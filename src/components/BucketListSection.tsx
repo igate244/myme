@@ -235,7 +235,7 @@ const BucketListSection: React.FC<Props> = ({ onBack }) => {
           ) : sortedItems.length === 0 ? (
             <p style={emptyStateStyle}>該当する項目がありません。</p>
           ) : (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
               {sortedItems.map((item) => {
                 const countdown = item.status === "done" ? null : getCountdown(item.deadline);
                 const doneCount = item.checklist.filter((check) => check.isDone).length;

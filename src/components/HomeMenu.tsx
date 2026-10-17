@@ -1,6 +1,6 @@
 // src/components/HomeMenu.tsx — ホーム画面
 //
-// 2026年10月の一新で、ゲーム風のタイル（冒険の記録・クエスト…）から落ち着いた一覧に変えた。
+// 2026年10月の一新で落ち着いた見た目に。タイルの並びはオーナーの好みで残している。
 // 人物名鑑（→人間図鑑アプリ）とカウンター（→KEEP）は独立アプリに移したので並べていない。
 import React from "react";
 import { useDriveSync } from "../hooks/useDriveSync";
@@ -22,30 +22,16 @@ type Props = {
   onSelect: (view: SectionView) => void;
 };
 
-type MenuItem = { view: SectionView; title: string; desc: string };
+type MenuItem = { view: SectionView; title: string; desc: string; icon: string };
 
-const GROUPS: Array<{ label: string; items: MenuItem[] }> = [
-  {
-    label: "記録する",
-    items: [
-      { view: "lifeLog", title: "ライフログ", desc: "人生の出来事・転機" },
-      { view: "growth", title: "子どもの記録", desc: "成長・できるようになったこと" },
-    ],
-  },
-  {
-    label: "考える",
-    items: [
-      { view: "bucketList", title: "やりたいこと", desc: "いつかやること・進めていること" },
-      { view: "strategy", title: "指針", desc: "考え方・学び・決めごと" },
-    ],
-  },
-  {
-    label: "残す",
-    items: [
-      { view: "legacy", title: "遺すもの", desc: "手紙・思い出・伝えたいこと" },
-      { view: "profile", title: "自分", desc: "プロフィール・自己分析・設定" },
-    ],
-  },
+// 2列のタイル。並びは旧 MYME のホームに合わせている
+const MENU_ITEMS: MenuItem[] = [
+  { view: "lifeLog", title: "ライフログ", desc: "人生の出来事", icon: "📖" },
+  { view: "growth", title: "子どもの記録", desc: "成長の記録", icon: "🌱" },
+  { view: "bucketList", title: "やりたいこと", desc: "いつかやること", icon: "🚩" },
+  { view: "strategy", title: "指針", desc: "考え方・学び", icon: "♟️" },
+  { view: "legacy", title: "遺すもの", desc: "手紙・思い出", icon: "✉️" },
+  { view: "profile", title: "自分", desc: "プロフィール・設定", icon: "👤" },
 ];
 
 const formatToday = (): string => {
@@ -67,41 +53,43 @@ const HomeMenu: React.FC<Props> = ({ onSelect }) => {
       </div>
 
       <div style={{ width: "100%", maxWidth: contentMaxWidth, padding: "0 16px" }}>
-        {GROUPS.map((group) => (
-          <section key={group.label} style={{ marginTop: 20 }}>
-            <div style={{ fontSize: "0.75rem", color: TEXT_MUTED, fontWeight: 600, margin: "0 4px 8px" }}>{group.label}</div>
-            <div style={{ background: SURFACE, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
-              {group.items.map((item, index) => (
-                <button
-                  key={item.view}
-                  type="button"
-                  onClick={() => onSelect(item.view)}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "15px 16px",
-                    background: "transparent",
-                    border: "none",
-                    borderTop: index === 0 ? "none" : `1px solid ${LINE}`,
-                    textAlign: "left",
-                    color: TEXT_MAIN,
-                  }}
-                >
-                  <span
-                    style={{ width: 10, height: 10, borderRadius: 999, background: SECTION_COLORS[item.view as keyof typeof SECTION_COLORS], flexShrink: 0 }}
-                  />
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontWeight: 600, fontSize: "1rem" }}>{item.title}</span>
-                    <span style={{ display: "block", fontSize: "0.78rem", color: TEXT_MUTED, marginTop: 1 }}>{item.desc}</span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 16 }}>
+          {MENU_ITEMS.map((item) => {
+            const color = SECTION_COLORS[item.view as keyof typeof SECTION_COLORS];
+            return (
+              <button
+                key={item.view}
+                type="button"
+                onClick={() => onSelect(item.view)}
+                style={{
+                  position: "relative",
+                  minHeight: 108,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  padding: "14px 14px 12px",
+                  background: SURFACE,
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 14,
+                  textAlign: "left",
+                  color: TEXT_MAIN,
+                  overflow: "hidden",
+                }}
+              >
+                <span style={{ position: "absolute", left: 0, top: 0, right: 0, height: 3, background: color, opacity: 0.8 }} />
+                <span style={{ fontSize: "1.6rem", lineHeight: 1 }}>{item.icon}</span>
+                <span style={{ minWidth: 0, width: "100%" }}>
+                  <span style={{ display: "block", fontWeight: 700, fontSize: "1rem" }}>{item.title}</span>
+                  <span style={{ display: "block", fontSize: "0.74rem", color: TEXT_MUTED, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {item.desc}
                   </span>
-                  <span style={{ color: TEXT_MUTED, fontSize: "1.3rem", lineHeight: 1 }}>›</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
         {drive.configured && (
           <section style={{ marginTop: 28 }}>

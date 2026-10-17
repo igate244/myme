@@ -267,7 +267,7 @@ const LegacySection: React.FC<Props> = ({ onBack }) => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                   gap: 12,
                   marginTop: 16,
                   paddingBottom: 40,

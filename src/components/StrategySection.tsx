@@ -207,7 +207,7 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
           ) : filteredItems.length === 0 ? (
             <p style={emptyStateStyle}>データがありません。</p>
           ) : (
-            <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, marginTop: 16 }}>
               {filteredItems.map((item) => {
                 const cat = STRATEGY_CATS[item.category];
                 const verdictDef = VERDICTS[item.verdict];
@@ -326,7 +326,7 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
       {showForm && (
         <div style={modalOverlayStyle} onClick={resetForm}>
           <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
-            <h3 style={sectionTitleStyle}>{editingId ? "編集" : "知恵を追加"}</h3>
+            <h3 style={sectionTitleStyle}>{editingId ? "編集" : "指針を追加"}</h3>
             <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {(Object.keys(STRATEGY_CATS) as StrategyCategory[]).map((key) => {

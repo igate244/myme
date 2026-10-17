@@ -118,7 +118,7 @@ export const modalContentStyle: CSSProperties = {
 export const sectionTitleStyle: CSSProperties = {
   fontSize: "1.1rem",
   fontWeight: 700,
-  margin: 0,
+  margin: "0 0 14px",
   color: TEXT_MAIN,
   letterSpacing: "0.02em",
 };

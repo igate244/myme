@@ -20,6 +20,11 @@ body {
   min-height: 100dvh;
 }
 
+/* 長いURLや英単語でも画面幅で折り返す */
+body {
+  overflow-wrap: anywhere;
+}
+
 /*
   button / input / select / textarea は既定で親のフォントを継承しない。
   指定しないとボタンだけブラウザ標準のフォントで表示されてしまう。
@@ -83,4 +88,10 @@ input[type="date"] {
 input::placeholder,
 textarea::placeholder {
   color: #5f5e5b;
+}
+
+/* スマホ前提：何かが横にはみ出しても画面全体が横に揺れないようにする（はみ出しの本体は各画面で直す） */
+html,
+body {
+  overflow-x: clip;
 }

@@ -10,7 +10,9 @@
   - バックアップ JSON のキー名（`ExportedData`）は変えない（旧 MYME のバックアップを読めなくなる）
   - Firebase プロジェクト（myme-c829c）と公開アドレスは変えない。ログインの uid とアドレス（オリジン）が端末内データの持ち主キーになっている
 - 変更したら `npm test` と `npm run build` が通ることを確認してから main に push する（push＝本番公開）
-- 画面を変えたら、スマホ幅（390px）でスクリーンショットを撮って崩れていないか自分で見る（`npm run dev` → http://localhost:5173/?demo でログインを省いて見られる）
+- **スマホで見る前提**。画面を変えたら、スマホ幅（390px）で長い文字・長いURL入りのデータを入れてスクリーンショットを撮り、横にはみ出していないか自分で見る
+  - grid は `gridTemplateColumns: "minmax(0, 1fr)"` のように最小幅0を指定する（長い1行で列が画面より広がる事故があった）
+  - ホームは2列のタイル（オーナーの好み）（`npm run dev` → http://localhost:5173/?demo でログインを省いて見られる）
 - 依存パッケージは増やさない（react / react-dom / dexie / esbuild / tsx だけ）。Firebase SDK は gstatic から動的 import
 - 見た目は「落ち着いたデザイン」。グラデーション・光彩・ゲーム風の言い回しは使わない。色は `src/components/uiStyles.ts` のトークンから
 - オーナーへの報告は短く、くだけた日本語で。結果と「スマホで何をすればいいか」だけ

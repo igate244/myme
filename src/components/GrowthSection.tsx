@@ -206,7 +206,7 @@ const GrowthSection: React.FC<Props> = ({ onBack }) => {
 
         <div style={chipRowStyle}>
           <button type="button" onClick={() => setFilterTag(null)} style={chipStyle(filterTag === null)}>
-            全て
+            すべて
           </button>
           {TAG_CONFIG.map((tag) => (
             <button
