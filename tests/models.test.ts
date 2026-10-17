@@ -47,3 +47,43 @@ test("プロフィール：空欄は未設定扱い", () => {
   assert.equal(p.id, "u1");
   assert.equal(p.deep, undefined);
 });
+
+test("指針：旧データは種類・ピン留め・最初の感情付けに読み替わる", async () => {
+  const { normalizeStrategyItem, kindFromCategory } = await import("../src/domain/models.ts");
+  const quote = normalizeStrategyItem({ id: "q", category: "impression", title: "勝ちに不思議の勝ちあり、負けに不思議の負けなし", source: "野村克也", verdict: "none", strength: 2 }, "u1");
+  assert.equal(quote.kind, "quote");
+  assert.equal(quote.pinned, false);
+  assert.deepEqual(quote.emotions, ["going_well", "down"]);
+  assert.deepEqual(quote.notes, []);
+
+  const lesson = normalizeStrategyItem({ id: "l", category: "tactics", title: "なにか", verdict: "adopted", strength: 3 }, "u1");
+  assert.equal(lesson.kind, "lesson");
+  assert.equal(lesson.pinned, true, "重要度：大はピン留めに");
+  assert.equal(lesson.verdict, "adopted", "旧データは保持");
+  assert.deepEqual(lesson.emotions, []);
+
+  assert.equal(kindFromCategory("definition"), "definition");
+  assert.equal(kindFromCategory("theory"), "lesson");
+});
+
+test("指針：一度保存した感情・ピン・メモはそのまま使う", async () => {
+  const { normalizeStrategyItem } = await import("../src/domain/models.ts");
+  const item = normalizeStrategyItem(
+    { id: "q", category: "impression", kind: "lesson", title: "勝ちに不思議の勝ちあり、負けに不思議の負けなし", strength: 3, emotions: [], pinned: false, notes: [{ id: "n", date: "2026-10-17", text: "また飲んだ" }] },
+    "u1",
+  );
+  assert.equal(item.kind, "lesson");
+  assert.deepEqual(item.emotions, [], "空にした感情は初期値で上書きしない");
+  assert.equal(item.pinned, false);
+  assert.equal(item.notes[0].text, "また飲んだ");
+});
+
+test("気持ちの記録・自分で足した気持ち", async () => {
+  const { normalizeMoodLog, normalizeCustomEmotions } = await import("../src/domain/models.ts");
+  assert.equal(normalizeMoodLog({ text: "id なし" }), null);
+  assert.equal(normalizeMoodLog({ id: "m", date: "2026-10-17", emotion: "anger", text: "x" })?.emotion, "anger");
+  assert.deepEqual(
+    normalizeCustomEmotions([{ id: "c-1", label: "寂しい", group: "hard" }, { label: "id なし" }]).map((e) => e.label),
+    ["寂しい"],
+  );
+});

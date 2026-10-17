@@ -13,6 +13,7 @@ import HomeMenu from "./components/HomeMenu";
 import YearlyGoalsSection from "./components/YearlyGoalsSection";
 import BucketListSection from "./components/BucketListSection";
 import StrategySection from "./components/StrategySection";
+import QuoteSection from "./components/QuoteSection";
 import ProfileSection from "./components/ProfileSection";
 import LegacySection from "./components/LegacySection";
 import GrowthSection from "./components/GrowthSection";
@@ -29,6 +30,7 @@ const SECTIONS: Record<SectionView, React.FC<{ onBack: () => void }>> = {
   lifeLog: YearlyGoalsSection,
   bucketList: BucketListSection,
   strategy: StrategySection,
+  quotes: QuoteSection,
   profile: ProfileSection,
   legacy: LegacySection,
   growth: GrowthSection,

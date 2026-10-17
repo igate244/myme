@@ -209,13 +209,39 @@ export type StrategyVerdict = (typeof STRATEGY_VERDICTS)[number];
 
 export type StrategyStrength = 1 | 2 | 3;
 
+/** 2026年10月の作り直しで追加した「種類」。旧 category から読み替える（impression＝名言、definition＝定義、それ以外＝教訓） */
+export const STRATEGY_KINDS = ["lesson", "definition", "quote"] as const;
+export type StrategyKind = (typeof STRATEGY_KINDS)[number];
+
+export const kindFromCategory = (category: StrategyCategory): StrategyKind =>
+  category === "impression" ? "quote" : category === "definition" ? "definition" : "lesson";
+
+/** 新しく作るときに旧 category にも入れておく値（旧形式しか読めない環境でも分類が崩れないように） */
+export const categoryFromKind = (kind: StrategyKind): StrategyCategory =>
+  kind === "quote" ? "impression" : kind === "definition" ? "definition" : "theory";
+
+/** 教訓につける振り返りメモ（「また破った」「効いた」など） */
+export interface StrategyNote {
+  id: string;
+  date: string;
+  text: string;
+}
+
 export interface StrategyItem {
   id: string;
   userId: string;
+  /** 旧分類。互換のため保持する（画面では kind を使う） */
   category: StrategyCategory;
+  kind: StrategyKind;
   title: string;
   detail?: string;
+  /** 名言なら「誰の言葉か」 */
   source?: string;
+  /** どの気持ちのときに効くか（Emotion の id） */
+  emotions: string[];
+  pinned: boolean;
+  notes: StrategyNote[];
+  /** 旧：採用／不採用・重要度。画面からは外したがデータは保持する */
   verdict: StrategyVerdict;
   strength: StrategyStrength;
   /** 既存データとの互換のため ISO 文字列のまま保持する */
@@ -224,9 +250,13 @@ export interface StrategyItem {
 
 export interface StrategyItemInput {
   category: StrategyCategory;
+  kind: StrategyKind;
   title: string;
   detail?: string;
   source?: string;
+  emotions: string[];
+  pinned: boolean;
+  notes: StrategyNote[];
   verdict: StrategyVerdict;
   strength: StrategyStrength;
 }
@@ -236,19 +266,132 @@ const toStrength = (value: unknown): StrategyStrength => {
   return n === 1 || n === 3 ? n : 2;
 };
 
+const normalizeStrategyNote = (raw: unknown, index: number): StrategyNote => {
+  const r = asRaw(raw);
+  return { id: str(r.id) ?? `note-${index}`, date: str(r.date) ?? "", text: str(r.text) ?? "" };
+};
+
 export const normalizeStrategyItem = (raw: unknown, fallbackUserId: string): StrategyItem => {
   const r = asRaw(raw);
+  const category = oneOf(r.category, STRATEGY_CATEGORIES, "tactics");
+  const title = str(r.title) ?? "無題";
+  const strength = toStrength(r.strength);
   return {
     id: str(r.id) ?? "",
     userId: str(r.userId) ?? fallbackUserId,
-    category: oneOf(r.category, STRATEGY_CATEGORIES, "tactics"),
-    title: str(r.title) ?? "無題",
+    category,
+    kind: oneOf(r.kind, STRATEGY_KINDS, kindFromCategory(category)),
+    title,
     detail: str(r.detail),
     source: str(r.source),
+    // 感情がまだ付いていない旧データは、最初の振り分け（下の表）を使う
+    emotions: Array.isArray(r.emotions) ? strArray(r.emotions) : (INITIAL_EMOTIONS[title.trim()] ?? []),
+    // 旧「重要度：大」はピン留めとして引き継ぐ
+    pinned: typeof r.pinned === "boolean" ? r.pinned : strength === 3,
+    notes: Array.isArray(r.notes) ? r.notes.map(normalizeStrategyNote) : [],
     verdict: oneOf(r.verdict, STRATEGY_VERDICTS, "none"),
-    strength: toStrength(r.strength),
+    strength,
     createdAt: str(r.createdAt) ?? new Date(0).toISOString(),
   };
+};
+
+/* --------------------------------------------------------------- 気持ち */
+
+export type EmotionGroup = "hard" | "good";
+
+export interface Emotion {
+  id: string;
+  label: string;
+  group: EmotionGroup;
+  /** 選んだときの案内 */
+  hint: string;
+}
+
+/** 決まっている気持ち。id は保存データに入るので変えないこと（落ち込みは後悔も含む） */
+export const DEFAULT_EMOTIONS: Emotion[] = [
+  { id: "anger", label: "怒り", group: "hard", hint: "何が許せなかった？" },
+  { id: "down", label: "落ち込み", group: "hard", hint: "自分を責めすぎてない？" },
+  { id: "anxiety", label: "不安・焦り", group: "hard", hint: "今できることは一つだけでいい" },
+  { id: "envy", label: "嫉妬", group: "hard", hint: "本当はどうなりたい？" },
+  { id: "lost", label: "迷い", group: "hard", hint: "大事にしたいのはどっち？" },
+  { id: "unmotivated", label: "やる気が出ない", group: "hard", hint: "小さく一歩だけ" },
+  { id: "going_well", label: "うまくいってる", group: "good", hint: "油断してない？" },
+  { id: "fulfilled", label: "満たされてる", group: "good", hint: "今を味わって、感謝を" },
+];
+
+/** あとから自分で足した気持ち（設定に保存） */
+export const normalizeCustomEmotions = (raw: unknown): Emotion[] =>
+  (Array.isArray(raw) ? raw : [])
+    .map((row) => {
+      const r = asRaw(row);
+      const id = str(r.id);
+      const label = str(r.label);
+      if (!id || !label) return null;
+      return { id, label, group: oneOf(r.group, ["hard", "good"] as const, "hard"), hint: str(r.hint) ?? "" };
+    })
+    .filter((e): e is Emotion => e !== null);
+
+/** 気持ちを選んで読んだあとの一言（「何があった？」） */
+export interface MoodLog {
+  id: string;
+  date: string;
+  emotion: string;
+  text: string;
+  createdAt: number;
+}
+
+export const normalizeMoodLog = (raw: unknown): MoodLog | null => {
+  const r = asRaw(raw);
+  const id = str(r.id);
+  if (!id) return null;
+  return { id, date: str(r.date) ?? "", emotion: str(r.emotion) ?? "", text: str(r.text) ?? "", createdAt: toEpoch(r.createdAt, 0) };
+};
+
+/**
+ * 2026年10月時点の指針への最初の感情付け（オーナーと相談して Claude が中身から振り分けた）。
+ * 感情を一度でも保存した項目にはもう使われない。スマホから自由に直せる。
+ */
+const INITIAL_EMOTIONS: Record<string, string[]> = {
+  "迷った時はわくわくする方を選択": ["lost", "anxiety"],
+  "瞑想すすめ": ["anxiety", "anger"],
+  "1人で子育ては不可能、頼れる人に頼れる時に頼ろう": ["anxiety", "down"],
+  "共通の敵を作って戦う": ["anger"],
+  "学生は「時間内に満点」。 社会は「最速で7割」": ["anxiety", "lost"],
+  "胸を張って正しい行いをする": ["anger", "lost", "going_well"],
+  "何事にも感謝を": ["fulfilled", "envy", "down"],
+  "小さな変化でいいので変化し続ける": ["unmotivated", "down", "going_well"],
+  "責任が人を強くする": ["unmotivated", "anxiety"],
+  "酒を飲むと人生クオリティ下がる": ["going_well", "fulfilled"],
+  "寝不足は１日を無駄にするし危険、お肌に良くない、耳も聞こえない": ["unmotivated", "going_well"],
+  "洗濯乾燥機導入": ["anger"],
+  "食洗機導入": ["anger"],
+  "スマホゲーム": ["unmotivated"],
+  "幸せ": ["fulfilled", "down"],
+  "運": ["going_well", "down"],
+  "教育": ["anger"],
+  "失敗": ["down"],
+  "成功": ["going_well"],
+  "成長": ["unmotivated", "down"],
+  "才能": ["envy"],
+  "自由": ["lost"],
+  "時間": ["unmotivated"],
+  "人生": ["lost"],
+  "家族": ["anger", "fulfilled"],
+  "プロフェッショナル": ["going_well"],
+  "正義": ["anger"],
+  "大人": ["anger"],
+  "チャンスは目の前にあるものよ": ["anxiety", "lost"],
+  "悪いが、俺は大人じゃなくて...男なんだよ。": ["lost", "unmotivated"],
+  "今の自分が一番好き。そう言えるようになりたい": ["envy", "down"],
+  "当たり前のような毎日が、実は奇跡の連続": ["down", "fulfilled"],
+  "弱き者には弱き者の戦い方がある": ["envy", "down", "anxiety"],
+  "現状維持は、後退するのと同じだ": ["going_well", "unmotivated"],
+  "勝ちに不思議の勝ちあり、負けに不思議の負けなし": ["going_well", "down"],
+  "人間は、枠にはまるとつまらない。枠をはみ出したところに、面白さがある": ["lost", "envy"],
+  "俺が知りたいのは楽な道のりじゃない、険しい道の歩き方だ": ["down", "unmotivated", "anxiety"],
+  "お洒落して、街に出て、恋をしろ": ["unmotivated", "down"],
+  "当たり前を疑問に思わなくなったら、大人": ["going_well", "fulfilled"],
+  "自分を縛る鎖は自分で選ぶ。": ["lost", "anger"],
 };
 
 /* ------------------------------------------------------------ Companions */
@@ -518,6 +661,9 @@ export interface ExportedData {
   counterLogs: CounterLog[];
   growthLogs: GrowthLog[];
   familyMembers: FamilyMember[];
+  /** 2026年10月に追加。古いバックアップには無い */
+  moodLogs?: MoodLog[];
+  customEmotions?: Emotion[];
 }
 
 /** バックアップ JSON から配列を安全に取り出す */

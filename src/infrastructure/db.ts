@@ -9,7 +9,7 @@ import Dexie from "dexie";
 import type { Table } from "dexie";
 import type {
   UserProfile, LifeLog, BucketItem, StrategyItem, Companion,
-  Experiment, LegacyItem, CounterItem, CounterLog, GrowthLog, FamilyMember,
+  Experiment, LegacyItem, CounterItem, CounterLog, GrowthLog, FamilyMember, MoodLog,
 } from "../domain/models";
 
 export type MymeDatabase = Dexie & {
@@ -24,6 +24,8 @@ export type MymeDatabase = Dexie & {
   counterLogs: Table<CounterLog, number>;
   growthLogs: Table<GrowthLog, string>;
   familyMembers: Table<FamilyMember, string>;
+  moodLogs: Table<MoodLog, string>;
+  appSettings: Table<{ id: string; value: unknown }, string>;
 };
 
 export const db = new Dexie("MymeDatabase") as MymeDatabase;
@@ -60,4 +62,23 @@ db.version(3).stores({
   counterLogs: "++id, itemId, date, [itemId+date]",
   growthLogs: "id, childId, date",
   familyMembers: "id, order",
+});
+
+// --- v4 の変更点（2026年10月：指針の作り直し） ---
+//  * moodLogs：気持ちを選んで読んだあとの一言（「何があった？」）
+//  * appSettings：自分で足した気持ちなどの設定（id と value だけの入れ物）
+db.version(4).stores({
+  lifeLogs: "id, userId, date",
+  bucketList: "id, userId, status",
+  strategies: "id, userId, category",
+  companions: "id, userId, category",
+  experiments: "id, userId, status",
+  userProfile: "id",
+  legacies: "id, userId, forWho",
+  counterItems: "id, userId, order",
+  counterLogs: "++id, itemId, date, [itemId+date]",
+  growthLogs: "id, childId, date",
+  familyMembers: "id, order",
+  moodLogs: "id, date",
+  appSettings: "id",
 });

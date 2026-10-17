@@ -16,10 +16,11 @@ import type {
   LegacyItem, LegacyItemInput,
   CounterItem, CounterItemInput, CounterLog,
   GrowthLog, FamilyMember,
-  ExportedData,
+  ExportedData, MoodLog, Emotion,
 } from "../domain/models";
 import {
   normalizeUserProfile, normalizeLifeLog, normalizeBucketItem, normalizeStrategyItem,
+  normalizeMoodLog, normalizeCustomEmotions,
   normalizeCompanion, normalizeExperiment, normalizeLegacyItem,
   normalizeCounterItem, normalizeCounterLog, normalizeGrowthLog, normalizeFamilyMember,
   rawArray,
@@ -133,6 +134,33 @@ export class DexieLifeStore implements LifeStore {
 
   async deleteStrategyItem(_userId: string, itemId: string): Promise<void> {
     await db.strategies.delete(itemId);
+  }
+
+  /* ------------------------------------------------- 気持ちの記録・設定 */
+
+  async getMoodLogs(): Promise<MoodLog[]> {
+    const rows = await db.moodLogs.toArray();
+    return rows
+      .map(normalizeMoodLog)
+      .filter(isNotNull)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  }
+
+  async saveMoodLog(log: MoodLog): Promise<void> {
+    await db.moodLogs.put(log);
+  }
+
+  async deleteMoodLog(id: string): Promise<void> {
+    await db.moodLogs.delete(id);
+  }
+
+  async getCustomEmotions(): Promise<Emotion[]> {
+    const row = await db.appSettings.get("customEmotions");
+    return normalizeCustomEmotions(row?.value);
+  }
+
+  async saveCustomEmotions(emotions: Emotion[]): Promise<void> {
+    await db.appSettings.put({ id: "customEmotions", value: emotions });
   }
 
   /* -------------------------------------------------------------- 人物図鑑 */
@@ -337,6 +365,7 @@ export class DexieLifeStore implements LifeStore {
         this.getGrowthLogs(),
         this.getFamilyMembers(),
       ]);
+    const [moodLogs, customEmotions] = await Promise.all([this.getMoodLogs(), this.getCustomEmotions()]);
 
     return {
       profile,
@@ -350,6 +379,8 @@ export class DexieLifeStore implements LifeStore {
       counterLogs: counterLogRows.map(normalizeCounterLog).filter(isNotNull),
       growthLogs,
       familyMembers,
+      moodLogs,
+      customEmotions,
     };
   }
 
@@ -371,6 +402,9 @@ export class DexieLifeStore implements LifeStore {
     const counterLogs = rawArray(source.counterLogs).map(normalizeCounterLog).filter(isNotNull);
     const growthLogs = rawArray(source.growthLogs).map(normalizeGrowthLog);
     const familyMembers = rawArray(source.familyMembers).map((row, index) => normalizeFamilyMember(row, index));
+    const moodLogs = rawArray(source.moodLogs).map(normalizeMoodLog).filter(isNotNull);
+    // 古いバックアップ（気持ちの設定が無い）を読んだときは、今の設定を消さずに残す
+    const customEmotions = Array.isArray(source.customEmotions) ? normalizeCustomEmotions(source.customEmotions) : null;
 
     const totalRecords =
       lifeLog.length + bucketList.length + strategies.length + companions.length +
@@ -388,14 +422,14 @@ export class DexieLifeStore implements LifeStore {
       [
         db.userProfile, db.lifeLogs, db.bucketList, db.strategies, db.companions,
         db.experiments, db.legacies, db.counterItems, db.counterLogs,
-        db.growthLogs, db.familyMembers,
+        db.growthLogs, db.familyMembers, db.moodLogs, db.appSettings,
       ],
       async () => {
         await Promise.all([
           db.userProfile.clear(), db.lifeLogs.clear(), db.bucketList.clear(),
           db.strategies.clear(), db.companions.clear(), db.experiments.clear(),
           db.legacies.clear(), db.counterItems.clear(), db.counterLogs.clear(),
-          db.growthLogs.clear(), db.familyMembers.clear(),
+          db.growthLogs.clear(), db.familyMembers.clear(), db.moodLogs.clear(),
         ]);
 
         if (profile) await db.userProfile.put({ ...profile, id: userId });
@@ -409,6 +443,8 @@ export class DexieLifeStore implements LifeStore {
         if (counterLogs.length) await db.counterLogs.bulkPut(counterLogs);
         if (growthLogs.length) await db.growthLogs.bulkPut(growthLogs);
         if (familyMembers.length) await db.familyMembers.bulkPut(familyMembers);
+        if (moodLogs.length) await db.moodLogs.bulkPut(moodLogs);
+        if (customEmotions) await db.appSettings.put({ id: "customEmotions", value: customEmotions });
       },
     );
   }

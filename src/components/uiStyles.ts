@@ -29,6 +29,7 @@ export const SECTION_COLORS = {
   growth: "#8fc4a1",
   bucketList: "#d9bd7a",
   strategy: "#8fb4d4",
+  quotes: "#c9b48a",
   legacy: "#d1a0c4",
   profile: "#8cc5c0",
 } as const;

@@ -4,6 +4,7 @@ export type SectionView =
   | "lifeLog"
   | "bucketList"
   | "strategy"
+  | "quotes"
   | "profile"
   | "legacy"
   | "growth";

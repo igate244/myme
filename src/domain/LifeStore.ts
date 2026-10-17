@@ -12,6 +12,7 @@ import type {
   LegacyItem, LegacyItemInput,
   CounterItem, CounterItemInput, CounterLog,
   GrowthLog, FamilyMember,
+  MoodLog, Emotion,
   ExportedData,
 } from "./models";
 
@@ -37,6 +38,13 @@ export interface LifeStore {
   addStrategyItem(userId: string, input: StrategyItemInput): Promise<StrategyItem>;
   updateStrategyItem(userId: string, itemId: string, input: StrategyItemInput): Promise<StrategyItem>;
   deleteStrategyItem(userId: string, itemId: string): Promise<void>;
+
+  /* ------------------------------------------------- 気持ちの記録・設定 */
+  getMoodLogs(): Promise<MoodLog[]>;
+  saveMoodLog(log: MoodLog): Promise<void>;
+  deleteMoodLog(id: string): Promise<void>;
+  getCustomEmotions(): Promise<Emotion[]>;
+  saveCustomEmotions(emotions: Emotion[]): Promise<void>;
 
   /* ------------------------------------------------------------ 人物図鑑 */
   getCompanions(userId: string): Promise<Companion[]>;

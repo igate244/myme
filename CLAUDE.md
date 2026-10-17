@@ -21,7 +21,12 @@
 ## 構成
 - `src/App.tsx` 画面の切り替え（`SECTIONS` の表に1行足せば画面が増える）
 - `src/components/*Section.tsx` 各画面
-  - ライフログ（YearlyGoals）・子どもの記録（Growth）・やりたいこと（BucketList）・指針（Strategy）・遺すもの（Legacy）・自分（Profile：プロフィール、ドライブのバックアップ、ファイル書き出し／読み込み）
+  - ライフログ（YearlyGoals）・子どもの記録（Growth）・やりたいこと（BucketList）・指針（Strategy）・名言（Quote）・遺すもの（Legacy）・自分（Profile：プロフィール、ドライブのバックアップ、ファイル書き出し／読み込み）
+  - 指針は「怒り・落ち込み・不安のときに開いて読む」画面（2026年10月に作り直し）。`src/components/strategy/`
+    - 気持ちを選ぶ → 一呼吸 → 効く言葉をめくる（FeelingFlow）→「何があった？」を moodLogs に保存
+    - 教訓・定義・名言は同じ `strategies` 表で `kind` が違うだけ。名言セクションは kind="quote" を出している
+    - 感情 id は `DEFAULT_EMOTIONS`（models.ts）。保存データに入るので id は変えない。自分で足した気持ちは appSettings
+    - 旧データの最初の感情付けは `INITIAL_EMOTIONS`（タイトルで引く）。旧「重要度：大」はピン留め、旧「採用／不採用」は教訓で「やってよかった／やめた」表示
   - 人物名鑑は「人間図鑑」アプリ、カウンターは「KEEP」アプリに独立したので画面から外した。**データ（DB の表・バックアップ）は残してある**
 - `src/components/uiStyles.ts` 色・共通スタイル（ダーク・モノトーン＋差し色）
 - `src/domain/` データの形（models.ts）と保存の窓口（LifeStore.ts）

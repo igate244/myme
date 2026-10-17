@@ -22,16 +22,17 @@ type Props = {
   onSelect: (view: SectionView) => void;
 };
 
-type MenuItem = { view: SectionView; title: string; desc: string; icon: string };
+type MenuItem = { view: SectionView; title: string; desc: string; icon: string; wide?: boolean };
 
 // 2列のタイル。並びは旧 MYME のホームに合わせている
 const MENU_ITEMS: MenuItem[] = [
   { view: "lifeLog", title: "ライフログ", desc: "人生の出来事", icon: "📖" },
   { view: "growth", title: "子どもの記録", desc: "成長の記録", icon: "🌱" },
   { view: "bucketList", title: "やりたいこと", desc: "いつかやること", icon: "🚩" },
-  { view: "strategy", title: "指針", desc: "考え方・学び", icon: "♟️" },
+  { view: "strategy", title: "指針", desc: "しんどい時・調子いい時に", icon: "🧭" },
+  { view: "quotes", title: "名言", desc: "刺さった言葉", icon: "💬" },
   { view: "legacy", title: "遺すもの", desc: "手紙・思い出", icon: "✉️" },
-  { view: "profile", title: "自分", desc: "プロフィール・設定", icon: "👤" },
+  { view: "profile", title: "自分", desc: "プロフィール・設定", icon: "👤", wide: true },
 ];
 
 const formatToday = (): string => {
@@ -63,7 +64,8 @@ const HomeMenu: React.FC<Props> = ({ onSelect }) => {
                 onClick={() => onSelect(item.view)}
                 style={{
                   position: "relative",
-                  minHeight: 108,
+                  gridColumn: item.wide ? "1 / -1" : undefined,
+                  minHeight: item.wide ? 72 : 108,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "flex-start",

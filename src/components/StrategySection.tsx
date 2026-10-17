@@ -1,320 +1,350 @@
-// src/components/StrategySection.tsx — 攻略の書（戦略・指針）
+// src/components/StrategySection.tsx — 指針
+//
+// 2026年10月に作り直し。「分類して保管する棚」から「しんどい時・調子いい時に開いて読む」画面へ。
+//   * 気持ちタブ：気持ちを選ぶ → 一呼吸 → 効く言葉をめくる → 「何があった？」（FeelingFlow）
+//   * 教訓・定義タブ：一覧と編集。名言は別セクション（QuoteSection）に分けたが、気持ちのめくりには混ぜて出す
+//   * ふりかえりタブ：「何があった？」に残した一言
+// 旧データの「採用／不採用・重要度」は画面から外した（データは保持、重要度：大はピン留めに引き継ぎ）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { useLifeStore } from "../domain/LifeStoreContext";
-import type { StrategyCategory, StrategyItem, StrategyItemInput, StrategyStrength, StrategyVerdict } from "../domain/models";
-import Field from "./Field";
+import type { Emotion, EmotionGroup, MoodLog, StrategyItem, StrategyKind, UserProfile } from "../domain/models";
+import { newId } from "../utils/id";
+import { useBackClose } from "../hooks/useBackClose";
 import SectionHeader from "./SectionHeader";
+import FeelingFlow from "./strategy/FeelingFlow";
+import ItemEditor from "./strategy/ItemEditor";
+import { useStrategyItems } from "./strategy/useStrategyItems";
+import { EmotionTag, GOOD_COLOR, HARD_COLOR, ItemRow, accentLink, emotionColor, todayString, useEmotions } from "./strategy/common";
 import {
-  outerStyle, scrollAreaStyle, contentMaxWidth, sectionTitleStyle, cardStyle,
-  textareaStyle, primaryButtonStyle, secondaryButtonStyle,
-  modalOverlayStyle, modalContentStyle, addButtonStyle,
-  chipStyle, chipRowStyle, errorTextStyle, emptyStateStyle, DANGER_COLOR,
+  outerStyle,
+  scrollAreaStyle,
+  contentMaxWidth,
+  addButtonStyle,
+  errorTextStyle,
+  emptyStateStyle,
+  modalOverlayStyle,
+  modalContentStyle,
+  sectionTitleStyle,
+  inputStyle,
+  labelStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  SURFACE,
+  LINE,
+  TEXT_MAIN,
+  TEXT_MUTED,
+  TEXT_SUB,
+  ACCENT,
+  DANGER_COLOR,
+  SECTION_COLORS,
 } from "./uiStyles";
 
 type Props = { onBack: () => void };
+type Tab = "feel" | "lesson" | "definition" | "log";
 
-const STRATEGY_CATS: Record<StrategyCategory, { label: string; color: string; icon: string }> = {
-  tactics: { label: "戦術", color: "#d9a07a", icon: "🛠" },
-  theory: { label: "法則", color: "#d9bd7a", icon: "📐" },
-  aesthetic: { label: "美学", color: "#d39bb8", icon: "✨" },
-  definition: { label: "定義", color: "#8fb4d4", icon: "🧠" },
-  impression: { label: "言葉", color: "#8fc4a1", icon: "💡" },
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: "feel", label: "気持ち" },
+  { key: "lesson", label: "教訓" },
+  { key: "definition", label: "定義" },
+  { key: "log", label: "ふりかえり" },
+];
+
+const GROUPS: Array<{ group: EmotionGroup; label: string; color: string }> = [
+  { group: "hard", label: "しんどい時", color: HARD_COLOR },
+  { group: "good", label: "調子いい時", color: GOOD_COLOR },
+];
+
+/* ------------------------------------------------------- 気持ちの編集 */
+
+const EmotionSettings: React.FC<{
+  custom: Emotion[];
+  onSave: (next: Emotion[]) => Promise<void>;
+  onClose: () => void;
+}> = ({ custom, onSave, onClose }) => {
+  const [list, setList] = useState(custom);
+  const [label, setLabel] = useState("");
+  const [group, setGroup] = useState<EmotionGroup>("hard");
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+        <h3 style={sectionTitleStyle}>気持ちを足す</h3>
+        <p style={{ color: TEXT_MUTED, fontSize: "0.82rem", marginTop: -6, lineHeight: 1.7 }}>
+          決まっている8つ以外に、自分で足した気持ち。消しても、付けていた言葉は残る。
+        </p>
+        {list.length > 0 && (
+          <div style={{ borderTop: `1px solid ${LINE}`, marginBottom: 16 }}>
+            {list.map((e) => (
+              <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${LINE}` }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: emotionColor(e) }} />
+                <span style={{ flex: 1 }}>{e.label}</span>
+                <button
+                  type="button"
+                  onClick={() => setList((prev) => prev.filter((x) => x.id !== e.id))}
+                  style={{ background: "transparent", border: "none", color: DANGER_COLOR, fontSize: "0.85rem" }}
+                >
+                  消す
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label style={labelStyle}>新しい気持ち</label>
+        <input style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="例：寂しい" />
+        <div style={{ display: "flex", gap: 8, margin: "10px 0 16px" }}>
+          {GROUPS.map((g) => (
+            <button
+              key={g.group}
+              type="button"
+              onClick={() => setGroup(g.group)}
+              style={{
+                ...secondaryButtonStyle,
+                flex: 1,
+                color: group === g.group ? g.color : TEXT_MUTED,
+                borderColor: group === g.group ? g.color : undefined,
+              }}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          disabled={!label.trim()}
+          onClick={() => {
+            setList((prev) => [...prev, { id: `c-${newId().slice(0, 8)}`, label: label.trim(), group, hint: "" }]);
+            setLabel("");
+          }}
+          style={{ ...secondaryButtonStyle, width: "100%", marginBottom: 16 }}
+        >
+          ＋ 一覧に足す
+        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={() => void onSave(list).then(onClose)} style={{ ...primaryButtonStyle, flex: 2 }}>
+            保存
+          </button>
+          <button type="button" onClick={onClose} style={{ ...secondaryButtonStyle, flex: 1 }}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
-const VERDICTS: Record<StrategyVerdict, { label: string; color: string; icon: string }> = {
-  adopted: { label: "採用", color: "#8fc4a1", icon: "✓" },
-  rejected: { label: "不採用", color: "#e5786d", icon: "✕" },
-  none: { label: "判定なし", color: "#8b8a87", icon: "─" },
-};
-
-const STRENGTHS: Record<StrategyStrength, { label: string; fontSize: string }> = {
-  3: { label: "大", fontSize: "1.2rem" },
-  2: { label: "中", fontSize: "1rem" },
-  1: { label: "小", fontSize: "0.9rem" },
-};
+/* -------------------------------------------------------------- 本体 */
 
 const StrategySection: React.FC<Props> = ({ onBack }) => {
   const { user } = useAuth();
   const store = useLifeStore();
+  const { items, loading, saving, error, save, remove, addNote, saveDefinition } = useStrategyItems();
+  const { all: emotions, custom, labelOf, saveCustom } = useEmotions();
 
-  const [items, setItems] = useState<StrategyItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const [filterCat, setFilterCat] = useState<StrategyCategory | "all">("all");
-  const [filterStrength, setFilterStrength] = useState<StrategyStrength | "all">("all");
-
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [category, setCategory] = useState<StrategyCategory>("tactics");
-  const [title, setTitle] = useState("");
-  const [detail, setDetail] = useState("");
-  const [verdict, setVerdict] = useState<StrategyVerdict>("none");
-  const [strength, setStrength] = useState<StrategyStrength>(2);
-
-  const loadItems = useCallback(async () => {
-    if (!user) return;
-    try {
-      setLoading(true);
-      setItems(await store.getStrategies(user.uid));
-      setError(null);
-    } catch (loadError) {
-      console.error(loadError);
-      setError("読み込みに失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }, [user, store]);
+  const [tab, setTab] = useState<Tab>("feel");
+  const [flowEmotion, setFlowEmotion] = useState<Emotion | null | undefined>(undefined);
+  const [editing, setEditing] = useState<{ kind: StrategyKind; item: StrategyItem | null } | null>(null);
+  const [showEmotionSettings, setShowEmotionSettings] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [moodLogs, setMoodLogs] = useState<MoodLog[]>([]);
 
   useEffect(() => {
-    void loadItems();
-  }, [loadItems]);
+    if (!user) return;
+    void store
+      .getUserProfile(user.uid)
+      .then(setProfile)
+      .catch(() => setProfile(null));
+  }, [user, store]);
 
-  const resetForm = (): void => {
-    setEditingId(null);
-    setCategory("tactics");
-    setTitle("");
-    setDetail("");
-    setVerdict("none");
-    setStrength(2);
-    setShowForm(false);
-  };
+  const loadMoodLogs = useCallback(() => {
+    void store
+      .getMoodLogs()
+      .then(setMoodLogs)
+      .catch((e: unknown) => console.error(e));
+  }, [store]);
 
-  const handleEdit = (item: StrategyItem): void => {
-    setEditingId(item.id);
-    setCategory(item.category);
-    setTitle(item.title);
-    setDetail(item.detail ?? "");
-    setVerdict(item.verdict);
-    setStrength(item.strength);
-    setShowForm(true);
-  };
+  useEffect(() => {
+    loadMoodLogs();
+  }, [loadMoodLogs]);
 
-  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!user || !title.trim()) return;
+  const lessons = useMemo(
+    () =>
+      items
+        .filter((i) => i.kind === "lesson")
+        .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt)),
+    [items],
+  );
+  const definitions = useMemo(
+    () =>
+      items
+        .filter((i) => i.kind === "definition")
+        // 書いてあるものを上、空のものは下
+        .sort(
+          (a, b) =>
+            Number(b.pinned) - Number(a.pinned) || Number(!!b.detail) - Number(!!a.detail) || a.createdAt.localeCompare(b.createdAt),
+        ),
+    [items],
+  );
 
-    try {
-      setSaving(true);
-      const input: StrategyItemInput = {
-        category,
-        title: title.trim(),
-        detail: detail.trim() || undefined,
-        verdict,
-        strength,
-      };
+  // Androidの戻るボタンで、めくり画面・編集シートを閉じる
+  useBackClose(flowEmotion !== undefined, () => setFlowEmotion(undefined));
+  useBackClose(editing !== null, () => setEditing(null));
+  useBackClose(showEmotionSettings, () => setShowEmotionSettings(false));
 
-      if (editingId) {
-        const updated = await store.updateStrategyItem(user.uid, editingId, input);
-        setItems((prev) => prev.map((item) => (item.id === editingId ? updated : item)));
-      } else {
-        const created = await store.addStrategyItem(user.uid, input);
-        setItems((prev) => [created, ...prev]);
-      }
-      resetForm();
-      setError(null);
-    } catch (submitError) {
-      console.error(submitError);
-      setError("保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const countFor = (id: string): number => items.filter((i) => i.emotions.includes(id)).length;
 
-  const handleDelete = async (id: string): Promise<void> => {
-    if (!user || !window.confirm("この項目を削除しますか？")) return;
-    try {
-      setSaving(true);
-      await store.deleteStrategyItem(user.uid, id);
-      setItems((prev) => prev.filter((item) => item.id !== id));
-      resetForm();
-    } catch (deleteError) {
-      console.error(deleteError);
-      setError("削除に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // 元の実装は state の配列をそのまま sort していて中身を書き換えていたため、
-  // コピーしてから並べ替える
-  const filteredItems = useMemo(() => {
-    const filtered = items.filter((item) => {
-      if (filterCat !== "all" && item.category !== filterCat) return false;
-      if (filterStrength !== "all" && item.strength !== filterStrength) return false;
-      return true;
+  const saveMood = async (text: string): Promise<void> => {
+    await store.saveMoodLog({
+      id: newId(),
+      date: todayString(),
+      emotion: flowEmotion?.id ?? "",
+      text,
+      createdAt: Date.now(),
     });
+    loadMoodLogs();
+  };
 
-    return [...filtered].sort((a, b) => b.strength - a.strength || b.createdAt.localeCompare(a.createdAt));
-  }, [items, filterCat, filterStrength]);
+  const deleteMood = async (id: string): Promise<void> => {
+    if (!window.confirm("この記録を消しますか？")) return;
+    await store.deleteMoodLog(id);
+    setMoodLogs((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const listCard = (rows: StrategyItem[], kind: StrategyKind, emptyText: string) =>
+    rows.length === 0 ? (
+      <p style={emptyStateStyle}>{emptyText}</p>
+    ) : (
+      <div style={{ background: SURFACE, border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ marginTop: -1 }}>
+          {rows.map((item) => (
+            <ItemRow key={item.id} item={item} emotions={emotions} onClick={() => setEditing({ kind, item })} />
+          ))}
+        </div>
+      </div>
+    );
 
   return (
     <div style={outerStyle}>
       <SectionHeader
         title="指針"
         onBack={onBack}
-        accentColor="#8fb4d4"
+        accentColor={SECTION_COLORS.strategy}
         action={
-          <button type="button" onClick={() => setShowForm(true)} style={addButtonStyle}>
-            ＋ 追加
-          </button>
+          tab === "lesson" || tab === "definition" ? (
+            <button type="button" onClick={() => setEditing({ kind: tab, item: null })} style={addButtonStyle}>
+              ＋ 追加
+            </button>
+          ) : undefined
         }
       >
-        <div style={chipRowStyle}>
-          <button type="button" onClick={() => setFilterCat("all")} style={chipStyle(filterCat === "all")}>
-            すべて
-          </button>
-          {(Object.keys(STRATEGY_CATS) as StrategyCategory[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilterCat(key)}
-              style={chipStyle(filterCat === key, STRATEGY_CATS[key].color)}
-            >
-              {STRATEGY_CATS[key].label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-          <span style={{ fontSize: "0.7rem", color: "#8b8a87" }}>重要度:</span>
-          <div style={{ display: "flex", gap: 4 }}>
-            <button type="button" onClick={() => setFilterStrength("all")} style={chipStyle(filterStrength === "all")}>
-              すべて
-            </button>
-            {([3, 2, 1] as StrategyStrength[]).map((value) => (
+        <div style={{ display: "flex", borderBottom: `1px solid ${LINE}` }}>
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            return (
               <button
-                key={value}
+                key={t.key}
                 type="button"
-                onClick={() => setFilterStrength(value)}
-                style={chipStyle(filterStrength === value)}
+                onClick={() => setTab(t.key)}
+                style={{
+                  flex: 1,
+                  padding: "8px 0 10px",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `2px solid ${active ? ACCENT : "transparent"}`,
+                  color: active ? TEXT_MAIN : TEXT_MUTED,
+                  fontWeight: active ? 700 : 500,
+                  fontSize: "0.9rem",
+                  marginBottom: -1,
+                }}
               >
-                {STRENGTHS[value].label}
+                {t.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </SectionHeader>
 
       <div style={scrollAreaStyle}>
-        <div style={{ width: "100%", maxWidth: contentMaxWidth, paddingBottom: 40 }}>
+        <div style={{ width: "100%", maxWidth: contentMaxWidth, paddingBottom: 48 }}>
           {error && <p style={errorTextStyle}>{error}</p>}
 
           {loading ? (
-            <p style={{ textAlign: "center", color: "#8b8a87", marginTop: 20 }}>読み込み中...</p>
-          ) : filteredItems.length === 0 ? (
-            <p style={emptyStateStyle}>データがありません。</p>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10, marginTop: 16 }}>
-              {filteredItems.map((item) => {
-                const cat = STRATEGY_CATS[item.category];
-                const verdictDef = VERDICTS[item.verdict];
-                const isCore = item.strength === 3;
-                const isMinor = item.strength === 1;
-
-                const borderColor =
-                  isCore
-                    ? item.verdict !== "none" ? verdictDef.color : cat.color
-                    : item.verdict === "adopted"
-                      ? `${verdictDef.color}40`
-                      : item.verdict === "rejected"
-                        ? `${verdictDef.color}30`
-                        : `${cat.color}30`;
-
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => handleEdit(item)}
-                    style={{
-                      ...cardStyle,
-                      marginBottom: 0,
-                      padding: "14px 16px",
-                      cursor: "pointer",
-                      border: `${isCore ? 2 : 1}px solid ${borderColor}`,
-                      boxShadow: "none",
-                      background:
-                        item.verdict === "adopted"
-                          ? `${VERDICTS.adopted.color}0f`
-                          : isMinor
-                            ? "#18191c"
-                            : "#18191c",
-                      opacity: item.verdict === "rejected" ? 0.6 : isMinor ? 0.8 : 1,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-                      <span
-                        style={{
-                          fontSize: isCore ? "1.8rem" : "1.4rem",
-                          filter: isMinor ? "grayscale(0.5)" : "none",
-                        }}
-                      >
-                        {item.verdict !== "none" ? verdictDef.icon : cat.icon}
-                      </span>
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                          <span
-                            style={{
-                              fontSize: "0.65rem",
-                              color: cat.color,
-                              border: `1px solid ${cat.color}40`,
-                              padding: "0 4px",
-                              borderRadius: 4,
-                            }}
-                          >
-                            {cat.label}
-                          </span>
-                          {isCore && <span style={{ fontSize: "0.6rem", color: "#d9bd7a", fontWeight: 700 }}>★ 重要</span>}
-                        </div>
-                        <div
+            <p style={{ textAlign: "center", color: TEXT_MUTED, marginTop: 24 }}>読み込み中…</p>
+          ) : tab === "feel" ? (
+            <>
+              <p style={{ textAlign: "center", color: TEXT_SUB, fontSize: "1rem", margin: "8px 0 18px" }}>今、どんな気持ち？</p>
+              {GROUPS.map((g) => (
+                <section key={g.group} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: "0.75rem", color: TEXT_MUTED, fontWeight: 600, margin: "0 4px 8px" }}>{g.label}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                    {emotions
+                      .filter((e) => e.group === g.group)
+                      .map((e) => (
+                        <button
+                          key={e.id}
+                          type="button"
+                          onClick={() => setFlowEmotion(e)}
                           style={{
-                            fontSize: STRENGTHS[item.strength].fontSize,
-                            fontWeight: isCore ? 800 : 700,
-                            color: isCore ? "#fff" : "#e8e6e3",
-                            lineHeight: 1.3,
+                            minHeight: 64,
+                            padding: "12px 14px",
+                            background: SURFACE,
+                            border: `1px solid ${LINE}`,
+                            borderLeft: `3px solid ${g.color}`,
+                            borderRadius: 12,
+                            color: TEXT_MAIN,
+                            textAlign: "left",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "center",
+                            gap: 2,
                           }}
                         >
-                          {item.title}
-                        </div>
-                        {item.detail && !isMinor && (
-                          <div
-                            style={{
-                              fontSize: "0.75rem",
-                              color: "#8b8a87",
-                              marginTop: 4,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {item.detail}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {item.verdict !== "none" && !isMinor && (
-                      <div
-                        style={{
-                          fontSize: "0.65rem",
-                          color: verdictDef.color,
-                          fontWeight: 700,
-                          border: `1px solid ${verdictDef.color}30`,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          whiteSpace: "nowrap",
-                          background: "rgba(0,0,0,0.2)",
-                        }}
+                          <span style={{ fontWeight: 700, fontSize: "1rem" }}>{e.label}</span>
+                          <span style={{ fontSize: "0.72rem", color: TEXT_MUTED }}>{countFor(e.id)}件</span>
+                        </button>
+                      ))}
+                  </div>
+                </section>
+              ))}
+              <button type="button" onClick={() => setFlowEmotion(null)} style={{ ...secondaryButtonStyle, width: "100%" }}>
+                気持ちを選ばずに全部めくる
+              </button>
+              <div style={{ textAlign: "center", marginTop: 8 }}>
+                <button type="button" onClick={() => setShowEmotionSettings(true)} style={accentLink}>
+                  気持ちを足す・消す
+                </button>
+              </div>
+            </>
+          ) : tab === "lesson" ? (
+            listCard(lessons, "lesson", "まだ教訓がありません。失敗したことや、やってよかったことを一言で残そう。")
+          ) : tab === "definition" ? (
+            listCard(definitions, "definition", "まだ定義がありません。")
+          ) : moodLogs.length === 0 ? (
+            <p style={emptyStateStyle}>
+              まだ記録がありません。
+              <br />
+              気持ちを選んで読んだあとの「何があった？」がここに残る。
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {moodLogs.map((log) => {
+                const e = emotions.find((x) => x.id === log.emotion);
+                return (
+                  <div key={log.id} style={{ background: SURFACE, border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: "0.8rem", color: TEXT_MUTED }}>{log.date.replaceAll("-", "/")}</span>
+                      {log.emotion && <EmotionTag emotion={e} label={labelOf(log.emotion)} />}
+                      <span style={{ flex: 1 }} />
+                      <button
+                        type="button"
+                        onClick={() => void deleteMood(log.id)}
+                        style={{ background: "transparent", border: "none", color: TEXT_MUTED, fontSize: "0.8rem" }}
+                        aria-label="消す"
                       >
-                        {verdictDef.label}
-                      </div>
-                    )}
+                        ✕
+                      </button>
+                    </div>
+                    <div style={{ lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{log.text}</div>
                   </div>
                 );
               })}
@@ -323,138 +353,31 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
         </div>
       </div>
 
-      {showForm && (
-        <div style={modalOverlayStyle} onClick={resetForm}>
-          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
-            <h3 style={sectionTitleStyle}>{editingId ? "編集" : "指針を追加"}</h3>
-            <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {(Object.keys(STRATEGY_CATS) as StrategyCategory[]).map((key) => {
-                  const active = category === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setCategory(key)}
-                      style={{
-                        flex: "1 0 30%",
-                        padding: "10px 0",
-                        borderRadius: 8,
-                        border: active ? `1px solid ${STRATEGY_CATS[key].color}` : "1px solid #36373d",
-                        background: active ? `${STRATEGY_CATS[key].color}20` : "transparent",
-                        color: active ? STRATEGY_CATS[key].color : "#8b8a87",
-                        fontSize: "0.75rem",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {STRATEGY_CATS[key].label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <Field label="項目名" name="title">
-                <textarea
-                  style={{ ...textareaStyle, minHeight: 60 }}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  rows={2}
-                  required
-                  placeholder="例：ドラム式洗濯機の導入"
-                />
-              </Field>
-
-              <div style={{ background: "#2a2b30", padding: 12, borderRadius: 8 }}>
-                <label style={{ display: "block", fontSize: "0.8rem", color: "#8b8a87", marginBottom: 8 }}>
-                  重要度・インパクト
-                </label>
-                <div style={{ display: "flex", gap: 1 }}>
-                  {([1, 2, 3] as StrategyStrength[]).map((value) => {
-                    const active = strength === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setStrength(value)}
-                        style={{
-                          flex: 1,
-                          padding: 10,
-                          border: active ? "1px solid #e8e6e3" : "1px solid #36373d",
-                          background: active ? "#36373d" : "transparent",
-                          color: active ? "#fff" : "#8b8a87",
-                          fontSize: "0.9rem",
-                          fontWeight: active ? 700 : 400,
-                          borderRadius: value === 1 ? "8px 0 0 8px" : value === 3 ? "0 8px 8px 0" : 0,
-                        }}
-                      >
-                        {STRENGTHS[value].label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: "block", fontSize: "0.8rem", color: "#8b8a87", marginBottom: 8 }}>判定 (結果)</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {(Object.keys(VERDICTS) as StrategyVerdict[]).map((key) => {
-                    const active = verdict === key;
-                    const def = VERDICTS[key];
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setVerdict(key)}
-                        style={{
-                          flex: 1,
-                          padding: 12,
-                          borderRadius: 8,
-                          border: active ? `2px solid ${def.color}` : "1px solid #36373d",
-                          background: active ? `${def.color}20` : "transparent",
-                          color: active ? def.color : "#8b8a87",
-                        }}
-                      >
-                        <div style={{ fontSize: "1.2rem", marginBottom: 2 }}>{def.icon}</div>
-                        <div style={{ fontSize: "0.8rem", fontWeight: 700 }}>{def.label}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <Field label="詳細 / 理由" name="detail">
-                <textarea
-                  style={{ ...textareaStyle, lineHeight: 1.6 }}
-                  value={detail}
-                  onChange={(e) => setDetail(e.target.value)}
-                  rows={4}
-                  placeholder="詳細や出典など..."
-                />
-              </Field>
-
-              {error && <p style={errorTextStyle}>{error}</p>}
-
-              <div style={{ display: "flex", gap: 10 }}>
-                <button type="submit" style={{ ...primaryButtonStyle, flex: 1 }} disabled={saving}>
-                  保存
-                </button>
-                {editingId && (
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(editingId)}
-                    style={{ ...secondaryButtonStyle, color: DANGER_COLOR, borderColor: DANGER_COLOR, flex: 1 }}
-                  >
-                    削除
-                  </button>
-                )}
-                <button type="button" onClick={resetForm} style={{ ...secondaryButtonStyle, flex: 1 }}>
-                  閉じる
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {flowEmotion !== undefined && (
+        <FeelingFlow
+          emotion={flowEmotion}
+          items={items}
+          profile={profile}
+          onSaveDefinition={saveDefinition}
+          onAddNote={addNote}
+          onSaveMood={saveMood}
+          onClose={() => setFlowEmotion(undefined)}
+        />
       )}
+
+      {editing && (
+        <ItemEditor
+          kind={editing.kind}
+          item={editing.item}
+          emotions={emotions}
+          saving={saving}
+          onSave={(input) => void save(editing.item?.id ?? null, input).then((ok) => ok && setEditing(null))}
+          onDelete={editing.item ? () => void remove(editing.item!.id).then((ok) => ok && setEditing(null)) : undefined}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      {showEmotionSettings && <EmotionSettings custom={custom} onSave={saveCustom} onClose={() => setShowEmotionSettings(false)} />}
     </div>
   );
 };
