@@ -1,0 +1,21 @@
+{
+  "name": "myme",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "MYME：人生を記録して振り返る、自分用のライフログ（PWA）",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "dexie": "^4.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "tsx": "^4.23.0"
+  }
+}

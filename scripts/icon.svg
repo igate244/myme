@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#111214"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M136 360 C 176 300, 210 330, 246 262 S 318 170, 376 150" stroke="#a5b4fc" stroke-width="26"/>
+    <circle cx="136" cy="360" r="20" fill="#e8e6e3" stroke="none"/>
+    <circle cx="246" cy="262" r="20" fill="#e8e6e3" stroke="none"/>
+    <circle cx="376" cy="150" r="20" fill="#e8e6e3" stroke="none"/>
+  </g>
+  <text x="256" y="446" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="58" font-weight="700" fill="#e8e6e3" letter-spacing="10">MYME</text>
+</svg>
