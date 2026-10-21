@@ -56,7 +56,7 @@ export const fixedHeaderStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  backgroundColor: "rgba(17, 18, 20, 0.96)",
+  backgroundColor: BG_COLOR, // 半透明だと下の文字が透けて見えた（2026-10-21）
   zIndex: 100,
   flexShrink: 0,
   borderBottom: `1px solid ${LINE}`,

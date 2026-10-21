@@ -1,4 +1,4 @@
-// src/components/strategy/useStrategyItems.ts — 指針・名言のデータ操作（両方の画面で共用）
+// src/components/strategy/useStrategyItems.ts — 真理図鑑・名言のデータ操作（両方の画面で共用）
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { useLifeStore } from "../../domain/LifeStoreContext";
@@ -6,7 +6,7 @@ import type { StrategyItem, StrategyItemInput } from "../../domain/models";
 import { newId } from "../../utils/id";
 import { todayString } from "./common";
 
-const toInput = (item: StrategyItem): StrategyItemInput => ({
+export const toInput = (item: StrategyItem): StrategyItemInput => ({
   kind: item.kind,
   category: item.category,
   title: item.title,
@@ -15,6 +15,10 @@ const toInput = (item: StrategyItem): StrategyItemInput => ({
   emotions: item.emotions,
   pinned: item.pinned,
   notes: item.notes,
+  field: item.field,
+  origin: item.origin,
+  foundDate: item.foundDate,
+  lifeLogId: item.lifeLogId,
   verdict: item.verdict,
   strength: item.strength,
 });
@@ -88,19 +92,18 @@ export const useStrategyItems = () => {
     [user, store],
   );
 
-  const addNote = useCallback(
-    async (item: StrategyItem, text: string) => {
-      await save(item.id, { ...toInput(item), notes: [{ id: newId(), date: todayString(), text }, ...item.notes] });
-    },
+  /** 「また実感した」を1件足す。戻り値は更新後の項目 */
+  const addReconfirm = useCallback(
+    async (item: StrategyItem, text: string, date = todayString()): Promise<boolean> =>
+      save(item.id, { ...toInput(item), notes: [{ id: newId(), date, text }, ...item.notes] }),
     [save],
   );
 
-  const saveDefinition = useCallback(
-    async (item: StrategyItem, detail: string) => {
-      await save(item.id, { ...toInput(item), detail });
-    },
+  const removeReconfirm = useCallback(
+    async (item: StrategyItem, noteId: string): Promise<boolean> =>
+      save(item.id, { ...toInput(item), notes: item.notes.filter((n) => n.id !== noteId) }),
     [save],
   );
 
-  return { items, loading, saving, error, save, remove, addNote, saveDefinition };
+  return { items, loading, saving, error, save, remove, addReconfirm, removeReconfirm };
 };

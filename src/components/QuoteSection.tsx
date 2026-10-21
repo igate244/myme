@@ -1,14 +1,12 @@
 // src/components/QuoteSection.tsx — 名言
 //
-// 2026年10月に指針から分けた。データは指針と同じ表（kind = "quote"）に入っている。
-// 指針の「気持ち」から開いたときは、名言も混ぜて出す。
+// 2026年10月に指針（現・真理図鑑）から分けた。データは同じ表（kind = "quote"）に入っている。
 import React, { useMemo, useState } from "react";
 import type { StrategyItem } from "../domain/models";
 import SectionHeader from "./SectionHeader";
 import { useBackClose } from "../hooks/useBackClose";
-import ItemEditor from "./strategy/ItemEditor";
+import QuoteEditor from "./strategy/QuoteEditor";
 import { useStrategyItems } from "./strategy/useStrategyItems";
-import { EmotionTag, useEmotions } from "./strategy/common";
 import {
   outerStyle,
   scrollAreaStyle,
@@ -31,7 +29,6 @@ type Props = { onBack: () => void };
 
 const QuoteSection: React.FC<Props> = ({ onBack }) => {
   const { items, loading, saving, error, save, remove } = useStrategyItems();
-  const { all: emotions } = useEmotions();
   const [query, setQuery] = useState("");
   const [person, setPerson] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ item: StrategyItem | null } | null>(null);
@@ -121,14 +118,6 @@ const QuoteSection: React.FC<Props> = ({ onBack }) => {
                     — {[item.source, item.detail].filter(Boolean).join("　")}
                   </div>
                 )}
-                {item.emotions.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {item.emotions.map((id) => {
-                      const e = emotions.find((x) => x.id === id);
-                      return <EmotionTag key={id} emotion={e} label={e?.label ?? id} />;
-                    })}
-                  </div>
-                )}
               </button>
             ))
           )}
@@ -136,10 +125,8 @@ const QuoteSection: React.FC<Props> = ({ onBack }) => {
       </div>
 
       {editing && (
-        <ItemEditor
-          kind="quote"
+        <QuoteEditor
           item={editing.item}
-          emotions={emotions}
           saving={saving}
           onSave={(input) => void save(editing.item?.id ?? null, input).then((ok) => ok && setEditing(null))}
           onDelete={editing.item ? () => void remove(editing.item!.id).then((ok) => ok && setEditing(null)) : undefined}

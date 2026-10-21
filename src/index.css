@@ -95,14 +95,3 @@ html,
 body {
   overflow-x: clip;
 }
-
-/* 指針：一呼吸の円（吸って4秒・吐いて4秒） */
-@keyframes mymeBreath {
-  0%,
-  100% {
-    transform: scale(0.55);
-  }
-  50% {
-    transform: scale(1);
-  }
-}

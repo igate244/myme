@@ -87,3 +87,39 @@ test("気持ちの記録・自分で足した気持ち", async () => {
     ["寂しい"],
   );
 });
+
+test("真理図鑑：旧データに分野・出どころ・見つけた日が付く", async () => {
+  const { normalizeStrategyItem } = await import("../src/domain/models.ts");
+  const t = normalizeStrategyItem({ id: "a", category: "theory", title: "酒を飲むと人生クオリティ下がる", createdAt: "2026-01-01T03:00:00.000Z" }, "u1");
+  assert.equal(t.field, "body_mind");
+  assert.equal(t.origin, "experience");
+  assert.equal(t.foundDate, "2026-01-01");
+  const q = normalizeStrategyItem({ id: "q", category: "impression", title: "名言" }, "u1");
+  assert.equal(q.origin, undefined, "名言には出どころを付けない");
+  const saved = normalizeStrategyItem({ id: "b", category: "theory", title: "酒を飲むと人生クオリティ下がる", field: "money", origin: "book", foundDate: "2020-05-05", lifeLogId: "l1" }, "u1");
+  assert.equal(saved.field, "money");
+  assert.equal(saved.origin, "book");
+  assert.equal(saved.foundDate, "2020-05-05");
+  assert.equal(saved.lifeLogId, "l1");
+});
+
+test("真理図鑑：確かさ・番号・まだ見つけてない真理・今日の一枚", async () => {
+  const { normalizeStrategyItem } = await import("../src/domain/models.ts");
+  const { certainty, isUnfound, numberTruths, pickOfTheDay, truthText, truthLead } = await import("../src/components/strategy/common.tsx");
+  const a = normalizeStrategyItem({ id: "a", category: "theory", title: "A", foundDate: "2026-02-01", notes: [{ id: "n", date: "2026-03-01", text: "" }] }, "u");
+  const b = normalizeStrategyItem({ id: "b", category: "definition", title: "仕事", detail: "誰かの困りごとを減らすこと", foundDate: "2025-01-01" }, "u");
+  const c = normalizeStrategyItem({ id: "c", category: "definition", title: "お金" }, "u");
+  const q = normalizeStrategyItem({ id: "q", category: "impression", title: "名言" }, "u");
+  assert.equal(certainty(a), 2);
+  assert.equal(isUnfound(c), true);
+  assert.equal(isUnfound(b), false);
+  assert.equal(truthText(b), "誰かの困りごとを減らすこと");
+  assert.equal(truthLead(b), "仕事とは");
+  const no = numberTruths([a, b, c, q]);
+  assert.equal(no.get("b"), 1);
+  assert.equal(no.get("a"), 2);
+  assert.equal(no.has("c"), false);
+  assert.equal(no.has("q"), false);
+  assert.equal(pickOfTheDay([a, b], "2026-10-21"), pickOfTheDay([a, b], "2026-10-21"), "同じ日は同じ1枚");
+  assert.equal(pickOfTheDay([], "2026-10-21"), undefined);
+});

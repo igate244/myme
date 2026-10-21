@@ -220,7 +220,18 @@ export const kindFromCategory = (category: StrategyCategory): StrategyKind =>
 export const categoryFromKind = (kind: StrategyKind): StrategyCategory =>
   kind === "quote" ? "impression" : kind === "definition" ? "definition" : "theory";
 
-/** 教訓につける振り返りメモ（「また破った」「効いた」など） */
+/** 真理図鑑の分野 */
+export const TRUTH_FIELDS = ["work", "family", "money", "people", "body_mind", "life"] as const;
+export type TruthField = (typeof TRUTH_FIELDS)[number];
+
+/** 真理の出どころ */
+export const TRUTH_ORIGINS = ["experience", "person", "book"] as const;
+export type TruthOrigin = (typeof TRUTH_ORIGINS)[number];
+
+/**
+ * 「また実感した」の記録（2026年10月の真理図鑑から）。
+ * 指針の時代の「振り返りメモ」と同じ入れ物なので、昔のメモもそのまま実感の記録として読める。
+ */
 export interface StrategyNote {
   id: string;
   date: string;
@@ -241,6 +252,11 @@ export interface StrategyItem {
   emotions: string[];
   pinned: boolean;
   notes: StrategyNote[];
+  /** 真理図鑑：分野・出どころ・見つけた日（YYYY-MM-DD）・きっかけになったライフログ */
+  field?: TruthField;
+  origin?: TruthOrigin;
+  foundDate: string;
+  lifeLogId?: string;
   /** 旧：採用／不採用・重要度。画面からは外したがデータは保持する */
   verdict: StrategyVerdict;
   strength: StrategyStrength;
@@ -257,6 +273,10 @@ export interface StrategyItemInput {
   emotions: string[];
   pinned: boolean;
   notes: StrategyNote[];
+  field?: TruthField;
+  origin?: TruthOrigin;
+  foundDate: string;
+  lifeLogId?: string;
   verdict: StrategyVerdict;
   strength: StrategyStrength;
 }
@@ -289,13 +309,61 @@ export const normalizeStrategyItem = (raw: unknown, fallbackUserId: string): Str
     // 旧「重要度：大」はピン留めとして引き継ぐ
     pinned: typeof r.pinned === "boolean" ? r.pinned : strength === 3,
     notes: Array.isArray(r.notes) ? r.notes.map(normalizeStrategyNote) : [],
+    // 分野・出どころが無い旧データは、最初の振り分け（下の表）と「自分の経験」を使う
+    field: typeof r.field === "string" ? oneOf(r.field, TRUTH_FIELDS, "life") : INITIAL_FIELDS[title.trim()],
+    origin: typeof r.origin === "string" ? oneOf(r.origin, TRUTH_ORIGINS, "experience") : category === "impression" ? undefined : "experience",
+    // 見つけた日が無い旧データは、書いた日を見つけた日にする
+    foundDate: str(r.foundDate) ?? isoToLocalDate(str(r.createdAt)),
+    lifeLogId: str(r.lifeLogId),
     verdict: oneOf(r.verdict, STRATEGY_VERDICTS, "none"),
     strength,
     createdAt: str(r.createdAt) ?? new Date(0).toISOString(),
   };
 };
 
+const isoToLocalDate = (iso: string | undefined): string => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime()) || d.getTime() === 0) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** 2026年10月時点の真理への最初の分野付け（Claude が中身から振り分けた。スマホから直せる） */
+const INITIAL_FIELDS: Record<string, TruthField> = {
+  "迷った時はわくわくする方を選択": "life",
+  "瞑想すすめ": "body_mind",
+  "1人で子育ては不可能、頼れる人に頼れる時に頼ろう": "family",
+  "共通の敵を作って戦う": "work",
+  "学生は「時間内に満点」。 社会は「最速で7割」": "work",
+  "仕事": "work",
+  "お金": "money",
+  "成功": "life",
+  "家族": "family",
+  "プロフェッショナル": "work",
+  "幸せ": "life",
+  "失敗": "life",
+  "運": "life",
+  "時間": "life",
+  "人生": "life",
+  "自由": "life",
+  "才能": "life",
+  "成長": "life",
+  "正義": "life",
+  "大人": "life",
+  "胸を張って正しい行いをする": "life",
+  "何事にも感謝を": "people",
+  "小さな変化でいいので変化し続ける": "life",
+  "責任が人を強くする": "work",
+  "酒を飲むと人生クオリティ下がる": "body_mind",
+  "寝不足は１日を無駄にするし危険、お肌に良くない、耳も聞こえない": "body_mind",
+  "洗濯乾燥機導入": "family",
+  "スマホゲーム": "body_mind",
+  "食洗機導入": "family",
+  "教育": "family",
+};
+
 /* --------------------------------------------------------------- 気持ち */
+// 2026年10月の指針で使った「気持ちから開く」入口は、真理図鑑への作り直しで画面から外した。
+// 付けた気持ち（emotions）と「何があった？」（moodLogs）はデータとして残してある。
 
 export type EmotionGroup = "hard" | "good";
 

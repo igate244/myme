@@ -21,16 +21,19 @@
 ## 構成
 - `src/App.tsx` 画面の切り替え（`SECTIONS` の表に1行足せば画面が増える）
 - `src/components/*Section.tsx` 各画面
-  - ライフログ（YearlyGoals）・子どもの記録（Growth）・やりたいこと（BucketList）・指針（Strategy）・名言（Quote）・遺すもの（Legacy）・自分（Profile：プロフィール、ドライブのバックアップ、ファイル書き出し／読み込み）
-  - 指針は「怒り・落ち込み・不安のときに開いて読む」画面（2026年10月に作り直し）。`src/components/strategy/`
-    - 気持ちを選ぶ → 一呼吸 → 効く言葉をめくる（FeelingFlow）→「何があった？」を moodLogs に保存
-    - 教訓・定義・名言は同じ `strategies` 表で `kind` が違うだけ。名言セクションは kind="quote" を出している
-    - 感情 id は `DEFAULT_EMOTIONS`（models.ts）。保存データに入るので id は変えない。自分で足した気持ちは appSettings
-    - 旧データの最初の感情付けは `INITIAL_EMOTIONS`（タイトルで引く）。旧「重要度：大」はピン留め、旧「採用／不採用」は教訓で「やってよかった／やめた」表示
+  - ライフログ（YearlyGoals）・子どもの記録（Growth）・やりたいこと（BucketList）・真理図鑑（Strategy）・名言（Quote）・遺すもの（Legacy）・自分（Profile：プロフィール、ドライブのバックアップ、ファイル書き出し／読み込み）
+  - **真理図鑑**（旧・指針。2026年10月21日に作り直し）：人生で見つけた真理を集めて育てる図鑑。`StrategySection.tsx` と `src/components/strategy/`
+    - 内部名（`strategies` 表・`StrategySection`・view `"strategy"`）は旧データ・バックアップ互換のため変えていない
+    - 真理＝ kind "lesson"（一言）か "definition"（「〇〇とは」。detail が空なら「まだ見つけてない真理」）。名言は kind "quote" で別セクション
+    - 分野 `field`・出どころ `origin`・見つけた日 `foundDate`・きっかけのライフログ `lifeLogId`。旧データの分野は `INITIAL_FIELDS`（タイトルで引く）
+    - 「また実感した」は `notes`。確かさ＝1＋notes の数。番号 No.xxx は見つけた日順
+    - ホームの「今日の真理」は日付ごとに同じ1つ（`pickOfTheDay`）
+    - 一時期あった「気持ちから開く」入口は外した。`emotions`・`moodLogs`・`appSettings.customEmotions` はデータとして残してある（消さない）
   - 人物名鑑は「人間図鑑」アプリ、カウンターは「KEEP」アプリに独立したので画面から外した。**データ（DB の表・バックアップ）は残してある**
 - `src/components/uiStyles.ts` 色・共通スタイル（ダーク・モノトーン＋差し色）
 - `src/domain/` データの形（models.ts）と保存の窓口（LifeStore.ts）
 - `src/infrastructure/` IndexedDB（Dexie）実装、Google ドライブ（drive.file、`MYME_Backup` フォルダ、30世代）、Firebase Auth の読み込み
+  - ドライブのトークンは sessionStorage なので、アプリを閉じると切れる。連携の目印と最後の保存時刻を localStorage（`myme.driveLinked` / `myme.lastBackupAt`）に残し、切れていたらホームに「バックアップが止まってる・再開する」を出す
 - `src/config.ts` 公開して問題ない設定値（Firebase ウェブ設定、OAuth クライアント ID）
 - `build.mjs` esbuild でビルド→ `dist/`、`src/sw.template.js` から sw.js を生成（オフライン対応）
 - `.github/workflows/deploy.yml` main への push で test→build→Firebase Hosting（https://myme-c829c.web.app）に公開

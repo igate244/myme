@@ -14,6 +14,32 @@ import { toFileTimestamp } from "../utils/dateUtils";
 /** 直前にアップロードした内容。変化がなければ自動バックアップを送らないために使う。 */
 let lastUploadedSignature: string | null = null;
 
+// 連携の目印と最後にバックアップできた時刻は localStorage に残す。
+// ドライブのトークンはアプリを閉じると消える（sessionStorage）ため、開き直すと連携が切れて
+// 自動バックアップが黙って止まっていた（2026-10-17〜21に実際に止まった）。
+// 目印が残っていれば、ホームに「止まってる・再開する」を出して気づけるようにする。
+const LINKED_KEY = "myme.driveLinked";
+const LAST_BACKUP_KEY = "myme.lastBackupAt";
+
+const readLocal = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+const writeLocal = (key: string, value: string | null): void => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // 保存できなくても動作は続ける
+  }
+  // 同じ画面の別の部品（ホームの表示と裏の自動バックアップ）にも知らせる
+  window.dispatchEvent(new Event(DRIVE_STATE_EVENT));
+};
+const DRIVE_STATE_EVENT = "myme-drive-state";
+
 export interface BackupOptions {
   /** ファイル名に入れる種別（例: Auto / Manual） */
   label?: string;
@@ -35,6 +61,10 @@ export interface DriveSync {
   disconnect: () => void;
   backupNow: (options?: BackupOptions) => Promise<boolean>;
   restoreLatest: () => Promise<boolean>;
+  /** 一度でも連携したことがあるか（今つながっているかは signedIn） */
+  linked: boolean;
+  /** 最後にバックアップできた時刻（ミリ秒）。分からなければ null */
+  lastBackupAt: number | null;
 }
 
 export const useDriveSync = (): DriveSync => {
@@ -45,8 +75,23 @@ export const useDriveSync = (): DriveSync => {
   const [signedIn, setSignedIn] = useState(driveService.isSignedIn);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [linked, setLinked] = useState(() => readLocal(LINKED_KEY) === "1");
+  const [lastBackupAt, setLastBackupAt] = useState<number | null>(() => {
+    const n = Number(readLocal(LAST_BACKUP_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
 
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    const sync = (): void => {
+      setLinked(readLocal(LINKED_KEY) === "1");
+      const n = Number(readLocal(LAST_BACKUP_KEY));
+      setLastBackupAt(Number.isFinite(n) && n > 0 ? n : null);
+    };
+    window.addEventListener(DRIVE_STATE_EVENT, sync);
+    return () => window.removeEventListener(DRIVE_STATE_EVENT, sync);
+  }, []);
   const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -83,21 +128,11 @@ export const useDriveSync = (): DriveSync => {
     }
   }, []);
 
-  const connect = useCallback(async () => {
-    try {
-      setBusy(true);
-      await driveService.signIn();
-      notify("Google と連携しました");
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "連携を開始できませんでした");
-    } finally {
-      if (mountedRef.current) setBusy(false);
-    }
-  }, [notify]);
-
   const disconnect = useCallback(() => {
     driveService.signOut();
     lastUploadedSignature = null;
+    writeLocal(LINKED_KEY, null);
+    setLinked(false);
     notify("連携を解除しました");
   }, [notify]);
 
@@ -117,11 +152,18 @@ export const useDriveSync = (): DriveSync => {
 
         if (skipIfUnchanged && json === lastUploadedSignature) {
           if (!silent) notify(null);
+          // 中身が同じでもバックアップは最新の状態なので、時刻だけ進める
+          const now = Date.now();
+          writeLocal(LAST_BACKUP_KEY, String(now));
+          if (mountedRef.current) setLastBackupAt(now);
           return true;
         }
 
         await driveService.uploadBackup(`MYME_${label}Backup_${toFileTimestamp()}.json`, json);
         lastUploadedSignature = json;
+        const now = Date.now();
+        writeLocal(LAST_BACKUP_KEY, String(now));
+        if (mountedRef.current) setLastBackupAt(now);
 
         if (!silent) notify("バックアップ完了 ✅");
         return true;
@@ -138,6 +180,23 @@ export const useDriveSync = (): DriveSync => {
     },
     [user, store, notify],
   );
+
+  /** 連携（再開）して、そのまま1回バックアップを取る */
+  const connect = useCallback(async () => {
+    try {
+      setBusy(true);
+      await driveService.signIn();
+      writeLocal(LINKED_KEY, "1");
+      setLinked(true);
+      notify("Google と連携しました");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "連携を開始できませんでした");
+      return;
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+    await backupNow({ label: "Auto" });
+  }, [notify, backupNow]);
 
   const restoreLatest = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
@@ -191,5 +250,7 @@ export const useDriveSync = (): DriveSync => {
     disconnect,
     backupNow,
     restoreLatest,
+    linked,
+    lastBackupAt,
   };
 };

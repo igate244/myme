@@ -1,192 +1,61 @@
-// src/components/strategy/common.tsx — 指針・名言で共通に使う部品
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useLifeStore } from "../../domain/LifeStoreContext";
-import { DEFAULT_EMOTIONS, type Emotion, type StrategyItem, type StrategyKind } from "../../domain/models";
-import { ACCENT, LINE_2, SURFACE_2, TEXT_MUTED, TEXT_SUB, WARN_COLOR } from "../uiStyles";
+// src/components/strategy/common.tsx — 真理図鑑・名言で共通に使う部品
+import type { StrategyItem, TruthField, TruthOrigin } from "../../domain/models";
+import { ACCENT } from "../uiStyles";
+import type React from "react";
 
-export const KIND_LABELS: Record<StrategyKind, string> = {
-  lesson: "教訓",
-  definition: "定義",
-  quote: "名言",
+export const FIELD_LABELS: Record<TruthField, { label: string; color: string }> = {
+  work: { label: "仕事", color: "#8fb4d4" },
+  family: { label: "家族", color: "#d9bd7a" },
+  money: { label: "お金", color: "#8fc4a1" },
+  people: { label: "人間関係", color: "#d39bb8" },
+  body_mind: { label: "心と体", color: "#8cc5c0" },
+  life: { label: "生き方", color: "#b4a0d8" },
 };
 
-/** 旧「採用／不採用」は、教訓では「やってよかった／やめた」として見せる */
-export const verdictLabel = (verdict: StrategyItem["verdict"]): string =>
-  verdict === "adopted" ? "やってよかった" : verdict === "rejected" ? "やめた" : "";
-
-export const HARD_COLOR = "#d39bb8";
-export const GOOD_COLOR = "#8fc4a1";
-
-/** 決まっている気持ち＋自分で足した気持ち */
-export const useEmotions = () => {
-  const store = useLifeStore();
-  const [custom, setCustom] = useState<Emotion[]>([]);
-
-  const reload = useCallback(async () => {
-    try {
-      setCustom(await store.getCustomEmotions());
-    } catch (loadError) {
-      console.error("気持ちの設定の読み込みに失敗しました", loadError);
-    }
-  }, [store]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  const all = useMemo(() => [...DEFAULT_EMOTIONS, ...custom], [custom]);
-  const labelOf = useCallback((id: string) => all.find((e) => e.id === id)?.label ?? id, [all]);
-
-  const saveCustom = useCallback(
-    async (next: Emotion[]) => {
-      await store.saveCustomEmotions(next);
-      setCustom(next);
-    },
-    [store],
-  );
-
-  return { all, custom, labelOf, saveCustom };
+export const ORIGIN_LABELS: Record<TruthOrigin, string> = {
+  experience: "自分の経験",
+  person: "人から教わった",
+  book: "本・作品から",
 };
 
-export const emotionColor = (emotion: Emotion | undefined): string => (emotion?.group === "good" ? GOOD_COLOR : HARD_COLOR);
+/** 真理図鑑に並ぶもの（名言は別セクション） */
+export const isTruth = (item: StrategyItem): boolean => item.kind !== "quote";
 
-/** 小さな気持ちの札 */
-export const EmotionTag: React.FC<{ emotion?: Emotion; label: string }> = ({ emotion, label }) => {
-  const color = emotionColor(emotion);
-  return (
-    <span
-      style={{
-        fontSize: "0.7rem",
-        color,
-        border: `1px solid ${color}55`,
-        borderRadius: 999,
-        padding: "1px 8px",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
+/** まだ中身のない定義（「〇〇とは？」）は「まだ見つけてない真理」 */
+export const isUnfound = (item: StrategyItem): boolean => item.kind === "definition" && !item.detail;
+
+/** 真理として見せる本文。定義は「〇〇とは」の中身、それ以外は一言 */
+export const truthText = (item: StrategyItem): string => (item.kind === "definition" ? (item.detail ?? "") : item.title);
+
+/** 定義のときだけ本文の上に出す見出し（「仕事とは」） */
+export const truthLead = (item: StrategyItem): string | null => (item.kind === "definition" ? `${item.title}とは` : null);
+
+/** 確かさ＝見つけた1回＋また実感した回数 */
+export const certainty = (item: StrategyItem): number => 1 + item.notes.length;
+
+/** 図鑑の番号（見つけた順。中身のある真理だけで数える） */
+export const numberTruths = (items: StrategyItem[]): Map<string, number> => {
+  const found = items
+    .filter((i) => isTruth(i) && !isUnfound(i))
+    .sort((a, b) => (a.foundDate || "9999").localeCompare(b.foundDate || "9999") || a.createdAt.localeCompare(b.createdAt));
+  return new Map(found.map((item, index) => [item.id, index + 1]));
 };
 
-/** 一覧の1行（教訓・定義・名言で共通） */
-export const ItemRow: React.FC<{
-  item: StrategyItem;
-  emotions: Emotion[];
-  onClick: () => void;
-}> = ({ item, emotions, onClick }) => {
-  const empty = item.kind === "definition" && !item.detail;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: "100%",
-        textAlign: "left",
-        display: "block",
-        padding: "12px 14px",
-        background: "transparent",
-        border: "none",
-        borderTop: `1px solid ${LINE_2}55`,
-        color: "inherit",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-        {item.pinned && <span style={{ color: WARN_COLOR, fontSize: "0.8rem", marginTop: 2 }}>★</span>}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, lineHeight: 1.45 }}>
-            {item.kind === "quote" ? `「${item.title}」` : item.title}
-            {item.kind === "lesson" && item.verdict !== "none" && (
-              <span style={{ fontSize: "0.72rem", fontWeight: 500, color: TEXT_MUTED, marginLeft: 8 }}>{verdictLabel(item.verdict)}</span>
-            )}
-          </div>
-          {empty ? (
-            <div style={{ fontSize: "0.78rem", color: TEXT_MUTED, marginTop: 2 }}>まだ書いてない</div>
-          ) : (
-            (item.detail || item.source) && (
-              <div
-                style={{
-                  fontSize: "0.78rem",
-                  color: TEXT_MUTED,
-                  marginTop: 2,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {item.kind === "quote" ? [item.source, item.detail].filter(Boolean).join("　") : item.detail}
-              </div>
-            )
-          )}
-          {item.emotions.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-              {item.emotions.map((id) => {
-                const e = emotions.find((x) => x.id === id);
-                return <EmotionTag key={id} emotion={e} label={e?.label ?? id} />;
-              })}
-            </div>
-          )}
-        </div>
-        {item.kind === "lesson" && item.notes.length > 0 && (
-          <span style={{ fontSize: "0.7rem", color: TEXT_SUB, background: SURFACE_2, borderRadius: 999, padding: "1px 7px" }}>
-            メモ{item.notes.length}
-          </span>
-        )}
-      </div>
-    </button>
-  );
-};
-
-/** 気持ちを複数選ぶチップ */
-export const EmotionPicker: React.FC<{
-  emotions: Emotion[];
-  value: string[];
-  onChange: (next: string[]) => void;
-}> = ({ emotions, value, onChange }) => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-    {(["hard", "good"] as const).map((group) => (
-      <div key={group} style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {emotions
-          .filter((e) => e.group === group)
-          .map((e) => {
-            const active = value.includes(e.id);
-            const color = emotionColor(e);
-            return (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => onChange(active ? value.filter((v) => v !== e.id) : [...value, e.id])}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 999,
-                  fontSize: "0.82rem",
-                  border: `1px solid ${active ? color : LINE_2}`,
-                  background: active ? `${color}22` : "transparent",
-                  color: active ? color : TEXT_MUTED,
-                  fontWeight: active ? 700 : 500,
-                }}
-              >
-                {e.label}
-              </button>
-            );
-          })}
-      </div>
-    ))}
-  </div>
-);
-
-export const shuffle = <T,>(list: T[]): T[] => {
-  const copy = [...list];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-};
+export const formatNo = (n: number | undefined): string => (n ? `No.${String(n).padStart(3, "0")}` : "");
 
 export const todayString = (): string => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+export const formatDate = (date: string): string => (date ? date.replaceAll("-", "/") : "");
+
+/** 日付ごとに同じ1枚を選ぶ（今日の一枚） */
+export const pickOfTheDay = <T,>(list: T[], date = todayString()): T | undefined => {
+  if (list.length === 0) return undefined;
+  let hash = 0;
+  for (const ch of date) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return list[hash % list.length];
 };
 
 export const accentLink: React.CSSProperties = {
