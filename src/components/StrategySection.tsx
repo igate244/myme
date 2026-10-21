@@ -9,13 +9,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { useLifeStore } from "../domain/LifeStoreContext";
-import { TRUTH_FIELDS, type LifeLog, type StrategyItem, type StrategyKind, type TruthField } from "../domain/models";
+import type { LifeLog, StrategyItem, StrategyKind, TruthField } from "../domain/models";
 import { useBackClose } from "../hooks/useBackClose";
 import SectionHeader from "./SectionHeader";
+import FieldSettings from "./strategy/FieldSettings";
 import TruthDetail from "./strategy/TruthDetail";
 import TruthEditor from "./strategy/TruthEditor";
 import { useStrategyItems } from "./strategy/useStrategyItems";
-import { FIELD_LABELS, certainty, formatNo, isTruth, isUnfound, numberTruths, truthLead, truthText } from "./strategy/common";
+import { accentLink, certainty, formatNo, isTruth, isUnfound, numberTruths, truthLead, truthText, useTruthFields } from "./strategy/common";
 import {
   outerStyle,
   scrollAreaStyle,
@@ -44,8 +45,8 @@ const ORDERS: Array<{ key: Order; label: string }> = [
   { key: "year", label: "年ごと" },
 ];
 
-const TruthCard: React.FC<{ item: StrategyItem; no?: number; onClick: () => void }> = ({ item, no, onClick }) => {
-  const field = item.field ? FIELD_LABELS[item.field] : null;
+const TruthCard: React.FC<{ item: StrategyItem; no?: number; fields: TruthField[]; onClick: () => void }> = ({ item, no, fields, onClick }) => {
+  const field = fields[0] ?? null;
   const count = certainty(item);
   const lead = truthLead(item);
   return (
@@ -67,10 +68,16 @@ const TruthCard: React.FC<{ item: StrategyItem; no?: number; onClick: () => void
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.72rem", color: TEXT_MUTED }}>
-        <span style={{ letterSpacing: "0.06em" }}>{formatNo(no)}</span>
-        {field && <span style={{ color: field.color }}>{field.label}</span>}
+        <span style={{ letterSpacing: "0.06em", flexShrink: 0 }}>{formatNo(no)}</span>
+        <span style={{ display: "flex", flexWrap: "wrap", gap: "0 8px", minWidth: 0 }}>
+          {fields.map((f) => (
+            <span key={f.id} style={{ color: f.color }}>
+              {f.label}
+            </span>
+          ))}
+        </span>
         <span style={{ flex: 1 }} />
-        {count > 1 && <span style={{ color: TEXT_SUB }}>{count}回実感</span>}
+        {count > 1 && <span style={{ color: TEXT_SUB, flexShrink: 0 }}>{count}回実感</span>}
       </div>
       <div style={{ lineHeight: 1.55 }}>
         {lead && <span style={{ color: TEXT_MUTED, fontSize: "0.85rem", marginRight: 6 }}>{lead}</span>}
@@ -86,7 +93,9 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
   const { items, loading, saving, error, save, remove, addReconfirm, removeReconfirm } = useStrategyItems();
 
   const [order, setOrder] = useState<Order>("certainty");
-  const [fieldFilter, setFieldFilter] = useState<TruthField | null>(null);
+  const [fieldFilter, setFieldFilter] = useState<string | null>(null);
+  const [showFieldSettings, setShowFieldSettings] = useState(false);
+  const { fields, save: saveFields, fieldsOf } = useTruthFields();
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ item: StrategyItem | null; kind?: StrategyKind } | null>(null);
   const [lifeLogs, setLifeLogs] = useState<LifeLog[]>([]);
@@ -101,13 +110,14 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
 
   useBackClose(openId !== null, () => setOpenId(null));
   useBackClose(editing !== null, () => setEditing(null));
+  useBackClose(showFieldSettings, () => setShowFieldSettings(false));
 
   const numbers = useMemo(() => numberTruths(items), [items]);
   const truths = useMemo(() => items.filter((i) => isTruth(i) && !isUnfound(i)), [items]);
   const unfound = useMemo(() => items.filter(isUnfound).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [items]);
 
   const shown = useMemo(() => {
-    const list = truths.filter((i) => !fieldFilter || i.field === fieldFilter);
+    const list = truths.filter((i) => !fieldFilter || i.fields.includes(fieldFilter));
     const byNew = (a: StrategyItem, b: StrategyItem) =>
       (b.foundDate || "").localeCompare(a.foundDate || "") || b.createdAt.localeCompare(a.createdAt);
     if (order === "certainty") return [...list].sort((a, b) => certainty(b) - certainty(a) || Number(b.pinned) - Number(a.pinned) || byNew(a, b));
@@ -124,8 +134,8 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
   }, [shown]);
 
   const fieldCounts = useMemo(() => {
-    const counts = new Map<TruthField, number>();
-    for (const t of truths) if (t.field) counts.set(t.field, (counts.get(t.field) ?? 0) + 1);
+    const counts = new Map<string, number>();
+    for (const t of truths) for (const f of t.fields) counts.set(f, (counts.get(f) ?? 0) + 1);
     return counts;
   }, [truths]);
 
@@ -134,7 +144,7 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
   const list = (rows: StrategyItem[]) => (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
       {rows.map((item) => (
-        <TruthCard key={item.id} item={item} no={numbers.get(item.id)} onClick={() => setOpenId(item.id)} />
+        <TruthCard key={item.id} item={item} no={numbers.get(item.id)} fields={fieldsOf(item)} onClick={() => setOpenId(item.id)} />
       ))}
     </div>
   );
@@ -155,16 +165,21 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
           <button type="button" onClick={() => setFieldFilter(null)} style={chipStyle(fieldFilter === null)}>
             すべて
           </button>
-          {TRUTH_FIELDS.filter((f) => fieldCounts.has(f)).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setFieldFilter(fieldFilter === f ? null : f)}
-              style={chipStyle(fieldFilter === f, FIELD_LABELS[f].color)}
-            >
-              {FIELD_LABELS[f].label} {fieldCounts.get(f)}
-            </button>
-          ))}
+          {fields
+            .filter((f) => fieldCounts.has(f.id))
+            .map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setFieldFilter(fieldFilter === f.id ? null : f.id)}
+                style={chipStyle(fieldFilter === f.id, f.color)}
+              >
+                {f.label} {fieldCounts.get(f.id)}
+              </button>
+            ))}
+          <button type="button" onClick={() => setShowFieldSettings(true)} style={{ ...accentLink, whiteSpace: "nowrap", padding: "4px 6px" }}>
+            編集
+          </button>
         </div>
       </SectionHeader>
 
@@ -253,6 +268,7 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
           item={openItem}
           no={numbers.get(openItem.id)}
           lifeLog={lifeLogs.find((l) => l.id === openItem.lifeLogId)}
+          fields={fieldsOf(openItem)}
           saving={saving}
           onReconfirm={(text) => addReconfirm(openItem, text)}
           onRemoveReconfirm={(noteId) => void removeReconfirm(openItem, noteId)}
@@ -266,6 +282,8 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
           item={editing.item}
           defaultKind={editing.kind}
           lifeLogs={lifeLogs}
+          fields={fields}
+          onEditFields={() => setShowFieldSettings(true)}
           saving={saving}
           onSave={(input) =>
             void save(editing.item?.id ?? null, input).then((ok) => {
@@ -285,6 +303,10 @@ const StrategySection: React.FC<Props> = ({ onBack }) => {
           }
           onClose={() => setEditing(null)}
         />
+      )}
+
+      {showFieldSettings && (
+        <FieldSettings fields={fields} counts={fieldCounts} onSave={saveFields} onClose={() => setShowFieldSettings(false)} />
       )}
     </div>
   );

@@ -91,13 +91,13 @@ test("気持ちの記録・自分で足した気持ち", async () => {
 test("真理図鑑：旧データに分野・出どころ・見つけた日が付く", async () => {
   const { normalizeStrategyItem } = await import("../src/domain/models.ts");
   const t = normalizeStrategyItem({ id: "a", category: "theory", title: "酒を飲むと人生クオリティ下がる", createdAt: "2026-01-01T03:00:00.000Z" }, "u1");
-  assert.equal(t.field, "body_mind");
+  assert.deepEqual(t.fields, ["body_mind"]);
   assert.equal(t.origin, "experience");
   assert.equal(t.foundDate, "2026-01-01");
   const q = normalizeStrategyItem({ id: "q", category: "impression", title: "名言" }, "u1");
   assert.equal(q.origin, undefined, "名言には出どころを付けない");
   const saved = normalizeStrategyItem({ id: "b", category: "theory", title: "酒を飲むと人生クオリティ下がる", field: "money", origin: "book", foundDate: "2020-05-05", lifeLogId: "l1" }, "u1");
-  assert.equal(saved.field, "money");
+  assert.deepEqual(saved.fields, ["money"], "1つだけだった頃の field も読む");
   assert.equal(saved.origin, "book");
   assert.equal(saved.foundDate, "2020-05-05");
   assert.equal(saved.lifeLogId, "l1");
@@ -122,4 +122,17 @@ test("真理図鑑：確かさ・番号・まだ見つけてない真理・今�
   assert.equal(no.has("q"), false);
   assert.equal(pickOfTheDay([a, b], "2026-10-21"), pickOfTheDay([a, b], "2026-10-21"), "同じ日は同じ1枚");
   assert.equal(pickOfTheDay([], "2026-10-21"), undefined);
+});
+
+test("真理図鑑：分野は複数持てる・分野の一覧は編集できる", async () => {
+  const { normalizeStrategyItem, normalizeTruthFields, DEFAULT_TRUTH_FIELDS } = await import("../src/domain/models.ts");
+  const multi = normalizeStrategyItem({ id: "m", category: "theory", title: "酒を飲むと人生クオリティ下がる", fields: ["body_mind", "money"], field: "work" }, "u1");
+  assert.deepEqual(multi.fields, ["body_mind", "money"], "fields があればそれを使う");
+  const cleared = normalizeStrategyItem({ id: "c", category: "theory", title: "酒を飲むと人生クオリティ下がる", fields: [] }, "u1");
+  assert.deepEqual(cleared.fields, [], "外した分野を最初の振り分けで戻さない");
+  assert.deepEqual(normalizeTruthFields(undefined), DEFAULT_TRUTH_FIELDS);
+  assert.deepEqual(
+    normalizeTruthFields([{ id: "work", label: "しごと", color: "#fff" }, { id: "x" }, { id: "f-1", label: "子育て" }]).map((f) => f.label),
+    ["しごと", "子育て"],
+  );
 });

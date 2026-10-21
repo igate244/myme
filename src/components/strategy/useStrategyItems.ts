@@ -15,7 +15,7 @@ export const toInput = (item: StrategyItem): StrategyItemInput => ({
   emotions: item.emotions,
   pinned: item.pinned,
   notes: item.notes,
-  field: item.field,
+  fields: item.fields,
   origin: item.origin,
   foundDate: item.foundDate,
   lifeLogId: item.lifeLogId,

@@ -6,7 +6,6 @@
 import React, { useMemo, useState } from "react";
 import {
   categoryFromKind,
-  TRUTH_FIELDS,
   TRUTH_ORIGINS,
   type LifeLog,
   type StrategyItem,
@@ -29,13 +28,15 @@ import {
   TEXT_MUTED,
   ACCENT,
 } from "../uiStyles";
-import { FIELD_LABELS, ORIGIN_LABELS, isUnfound, todayString } from "./common";
+import { ORIGIN_LABELS, accentLink, isUnfound, todayString } from "./common";
 
 type Props = {
   item: StrategyItem | null;
   /** 新しく書くときの形（定義の「まだ見つけてない真理」から開いたときは definition） */
   defaultKind?: StrategyKind;
   lifeLogs: LifeLog[];
+  fields: TruthField[];
+  onEditFields: () => void;
   saving: boolean;
   onSave: (input: StrategyItemInput) => void;
   onDelete?: () => void;
@@ -52,13 +53,14 @@ const pill = (active: boolean, color = ACCENT): React.CSSProperties => ({
   fontWeight: active ? 700 : 500,
 });
 
-const TruthEditor: React.FC<Props> = ({ item, defaultKind = "lesson", lifeLogs, saving, onSave, onDelete, onClose }) => {
+const TruthEditor: React.FC<Props> = ({ item, defaultKind = "lesson", lifeLogs, fields, onEditFields, saving, onSave, onDelete, onClose }) => {
   const [kind, setKind] = useState<StrategyKind>(item?.kind === "definition" ? "definition" : item ? "lesson" : defaultKind);
   // 一言の真理は title が本文。「〇〇とは」は title が言葉、detail が本文
   const [word, setWord] = useState(item?.kind === "definition" ? item.title : "");
   const [truth, setTruth] = useState(item ? (item.kind === "definition" ? (item.detail ?? "") : item.title) : "");
   const [story, setStory] = useState(item?.kind === "definition" ? "" : (item?.detail ?? ""));
-  const [field, setField] = useState<TruthField | undefined>(item?.field);
+  const [selected, setSelected] = useState<string[]>(item?.fields ?? []);
+  const toggleField = (id: string): void => setSelected((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
   const [origin, setOrigin] = useState<TruthOrigin>(item?.origin ?? "experience");
   const [source, setSource] = useState(item?.source ?? "");
   // 「まだ見つけてない真理」に初めて答えを書くときは、今日を見つけた日にする
@@ -79,7 +81,7 @@ const TruthEditor: React.FC<Props> = ({ item, defaultKind = "lesson", lifeLogs, 
       // 「〇〇とは」の形では、きっかけは書かない（本文が detail に入るため）
       detail: kind === "definition" ? truth.trim() || undefined : story.trim() || undefined,
       source: origin === "experience" ? undefined : source.trim() || undefined,
-      field,
+      fields: selected,
       origin,
       foundDate,
       lifeLogId: lifeLogId || undefined,
@@ -150,11 +152,16 @@ const TruthEditor: React.FC<Props> = ({ item, defaultKind = "lesson", lifeLogs, 
           )}
 
           <div>
-            <label style={labelStyle}>分野</label>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+              <label style={labelStyle}>分野（いくつでも）</label>
+              <button type="button" onClick={onEditFields} style={{ ...accentLink, fontSize: "0.78rem", padding: 0 }}>
+                分野を編集
+              </button>
+            </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {TRUTH_FIELDS.map((f) => (
-                <button key={f} type="button" onClick={() => setField(field === f ? undefined : f)} style={pill(field === f, FIELD_LABELS[f].color)}>
-                  {FIELD_LABELS[f].label}
+              {fields.map((f) => (
+                <button key={f.id} type="button" onClick={() => toggleField(f.id)} style={pill(selected.includes(f.id), f.color)}>
+                  {f.label}
                 </button>
               ))}
             </div>

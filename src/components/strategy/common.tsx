@@ -1,15 +1,54 @@
 // src/components/strategy/common.tsx — 真理図鑑・名言で共通に使う部品
-import type { StrategyItem, TruthField, TruthOrigin } from "../../domain/models";
-import { ACCENT } from "../uiStyles";
+import { useCallback, useEffect, useState } from "react";
 import type React from "react";
+import { useLifeStore } from "../../domain/LifeStoreContext";
+import { DEFAULT_TRUTH_FIELDS, type StrategyItem, type TruthField, type TruthOrigin } from "../../domain/models";
+import { ACCENT } from "../uiStyles";
 
-export const FIELD_LABELS: Record<TruthField, { label: string; color: string }> = {
-  work: { label: "仕事", color: "#8fb4d4" },
-  family: { label: "家族", color: "#d9bd7a" },
-  money: { label: "お金", color: "#8fc4a1" },
-  people: { label: "人間関係", color: "#d39bb8" },
-  body_mind: { label: "心と体", color: "#8cc5c0" },
-  life: { label: "生き方", color: "#b4a0d8" },
+/** 分野に選べる色（落ち着いた色だけ） */
+export const FIELD_COLORS = ["#8fb4d4", "#d9bd7a", "#8fc4a1", "#d39bb8", "#8cc5c0", "#b4a0d8", "#d9a07a", "#a9a7a3"];
+
+/** 分野の一覧（自分で編集できる）。画面の間で同じ内容を使えるよう、読み込んだものを共有する */
+let cachedFields: TruthField[] | null = null;
+const FIELDS_EVENT = "myme-truth-fields";
+
+export const useTruthFields = () => {
+  const store = useLifeStore();
+  const [fields, setFields] = useState<TruthField[]>(cachedFields ?? DEFAULT_TRUTH_FIELDS);
+
+  useEffect(() => {
+    let cancelled = false;
+    void store
+      .getTruthFields()
+      .then((list) => {
+        cachedFields = list;
+        if (!cancelled) setFields(list);
+      })
+      .catch((e: unknown) => console.error("分野の読み込みに失敗しました", e));
+    const sync = (): void => {
+      if (cachedFields) setFields(cachedFields);
+    };
+    window.addEventListener(FIELDS_EVENT, sync);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FIELDS_EVENT, sync);
+    };
+  }, [store]);
+
+  const save = useCallback(
+    async (next: TruthField[]) => {
+      await store.saveTruthFields(next);
+      cachedFields = next;
+      setFields(next);
+      window.dispatchEvent(new Event(FIELDS_EVENT));
+    },
+    [store],
+  );
+
+  /** 項目に付いている分野（消した分野は出さない）。並びは分野一覧の順 */
+  const fieldsOf = useCallback((item: StrategyItem): TruthField[] => fields.filter((f) => item.fields.includes(f.id)), [fields]);
+
+  return { fields, save, fieldsOf };
 };
 
 export const ORIGIN_LABELS: Record<TruthOrigin, string> = {

@@ -1,6 +1,6 @@
 // src/components/strategy/TruthDetail.tsx — 真理を1つ開いたところ（読む用）。「また実感した」をここで足す
 import React, { useState } from "react";
-import type { LifeLog, StrategyItem } from "../../domain/models";
+import type { LifeLog, StrategyItem, TruthField } from "../../domain/models";
 import {
   modalOverlayStyle,
   modalContentStyle,
@@ -13,12 +13,14 @@ import {
   TEXT_SUB,
   ACCENT,
 } from "../uiStyles";
-import { FIELD_LABELS, ORIGIN_LABELS, certainty, formatDate, formatNo, truthLead, truthText } from "./common";
+import { ORIGIN_LABELS, certainty, formatDate, formatNo, truthLead, truthText } from "./common";
 
 type Props = {
   item: StrategyItem;
   no?: number;
   lifeLog?: LifeLog;
+  /** この真理に付いている分野 */
+  fields: TruthField[];
   saving: boolean;
   onReconfirm: (text: string) => Promise<boolean>;
   onRemoveReconfirm: (noteId: string) => void;
@@ -26,10 +28,10 @@ type Props = {
   onClose: () => void;
 };
 
-const TruthDetail: React.FC<Props> = ({ item, no, lifeLog, saving, onReconfirm, onRemoveReconfirm, onEdit, onClose }) => {
+const TruthDetail: React.FC<Props> = ({ item, no, lifeLog, fields, saving, onReconfirm, onRemoveReconfirm, onEdit, onClose }) => {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
-  const field = item.field ? FIELD_LABELS[item.field] : null;
+  const field = fields[0] ?? null;
   const count = certainty(item);
   const lead = truthLead(item);
 
@@ -45,7 +47,11 @@ const TruthDetail: React.FC<Props> = ({ item, no, lifeLog, saving, onReconfirm, 
       <div style={{ ...modalContentStyle, borderTop: `3px solid ${field?.color ?? ACCENT}` }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.78rem", color: TEXT_MUTED, marginBottom: 14 }}>
           <span style={{ letterSpacing: "0.06em" }}>{formatNo(no)}</span>
-          {field && <span style={{ color: field.color }}>{field.label}</span>}
+          {fields.map((f) => (
+            <span key={f.id} style={{ color: f.color }}>
+              {f.label}
+            </span>
+          ))}
           <span style={{ flex: 1 }} />
           <button type="button" onClick={onEdit} style={{ background: "transparent", border: "none", color: TEXT_SUB, fontSize: "0.85rem", padding: 4 }}>
             編集

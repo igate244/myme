@@ -16,11 +16,11 @@ import type {
   LegacyItem, LegacyItemInput,
   CounterItem, CounterItemInput, CounterLog,
   GrowthLog, FamilyMember,
-  ExportedData, MoodLog, Emotion,
+  ExportedData, MoodLog, Emotion, TruthField,
 } from "../domain/models";
 import {
   normalizeUserProfile, normalizeLifeLog, normalizeBucketItem, normalizeStrategyItem,
-  normalizeMoodLog, normalizeCustomEmotions,
+  normalizeMoodLog, normalizeCustomEmotions, normalizeTruthFields,
   normalizeCompanion, normalizeExperiment, normalizeLegacyItem,
   normalizeCounterItem, normalizeCounterLog, normalizeGrowthLog, normalizeFamilyMember,
   rawArray,
@@ -161,6 +161,15 @@ export class DexieLifeStore implements LifeStore {
 
   async saveCustomEmotions(emotions: Emotion[]): Promise<void> {
     await db.appSettings.put({ id: "customEmotions", value: emotions });
+  }
+
+  async getTruthFields(): Promise<TruthField[]> {
+    const row = await db.appSettings.get("truthFields");
+    return normalizeTruthFields(row?.value);
+  }
+
+  async saveTruthFields(fields: TruthField[]): Promise<void> {
+    await db.appSettings.put({ id: "truthFields", value: fields });
   }
 
   /* -------------------------------------------------------------- 人物図鑑 */
@@ -365,7 +374,7 @@ export class DexieLifeStore implements LifeStore {
         this.getGrowthLogs(),
         this.getFamilyMembers(),
       ]);
-    const [moodLogs, customEmotions] = await Promise.all([this.getMoodLogs(), this.getCustomEmotions()]);
+    const [moodLogs, customEmotions, truthFields] = await Promise.all([this.getMoodLogs(), this.getCustomEmotions(), this.getTruthFields()]);
 
     return {
       profile,
@@ -381,6 +390,7 @@ export class DexieLifeStore implements LifeStore {
       familyMembers,
       moodLogs,
       customEmotions,
+      truthFields,
     };
   }
 
@@ -405,6 +415,7 @@ export class DexieLifeStore implements LifeStore {
     const moodLogs = rawArray(source.moodLogs).map(normalizeMoodLog).filter(isNotNull);
     // 古いバックアップ（気持ちの設定が無い）を読んだときは、今の設定を消さずに残す
     const customEmotions = Array.isArray(source.customEmotions) ? normalizeCustomEmotions(source.customEmotions) : null;
+    const truthFields = Array.isArray(source.truthFields) ? normalizeTruthFields(source.truthFields) : null;
 
     const totalRecords =
       lifeLog.length + bucketList.length + strategies.length + companions.length +
@@ -445,6 +456,7 @@ export class DexieLifeStore implements LifeStore {
         if (familyMembers.length) await db.familyMembers.bulkPut(familyMembers);
         if (moodLogs.length) await db.moodLogs.bulkPut(moodLogs);
         if (customEmotions) await db.appSettings.put({ id: "customEmotions", value: customEmotions });
+        if (truthFields) await db.appSettings.put({ id: "truthFields", value: truthFields });
       },
     );
   }

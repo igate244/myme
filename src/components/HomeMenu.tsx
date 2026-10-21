@@ -8,7 +8,7 @@ import { useLifeStore } from "../domain/LifeStoreContext";
 import type { StrategyItem } from "../domain/models";
 import { useDriveSync } from "../hooks/useDriveSync";
 import type { SectionView } from "../views";
-import { FIELD_LABELS, isTruth, isUnfound, pickOfTheDay, truthLead, truthText } from "./strategy/common";
+import { isTruth, isUnfound, pickOfTheDay, truthLead, truthText, useTruthFields } from "./strategy/common";
 import {
   outerStyle,
   contentMaxWidth,
@@ -78,7 +78,9 @@ const HomeMenu: React.FC<Props> = ({ onSelect }) => {
 
   // 今日の一枚：中身のある真理から、日付ごとに同じ1つを選ぶ
   const todays = useMemo(() => pickOfTheDay(items.filter((i) => isTruth(i) && !isUnfound(i)).sort((a, b) => a.id.localeCompare(b.id))), [items]);
-  const todaysField = todays?.field ? FIELD_LABELS[todays.field] : null;
+  const { fieldsOf } = useTruthFields();
+  const todaysFields = todays ? fieldsOf(todays) : [];
+  const todaysField = todaysFields[0] ?? null;
 
   // 一度連携したのに今つながっていない＝自動バックアップが止まっている
   const stopped = drive.configured && !drive.signedIn && (drive.linked || drive.lastBackupAt !== null);
@@ -140,7 +142,11 @@ const HomeMenu: React.FC<Props> = ({ onSelect }) => {
           >
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.72rem", color: TEXT_MUTED, marginBottom: 6 }}>
               今日の真理
-              {todaysField && <span style={{ color: todaysField.color }}>{todaysField.label}</span>}
+              {todaysFields.map((f) => (
+                <span key={f.id} style={{ color: f.color }}>
+                  {f.label}
+                </span>
+              ))}
             </span>
             {truthLead(todays) && <span style={{ display: "block", fontSize: "0.82rem", color: TEXT_MUTED }}>{truthLead(todays)}</span>}
             <span style={{ display: "block", fontSize: "1.08rem", fontWeight: 700, lineHeight: 1.6 }}>{truthText(todays)}</span>

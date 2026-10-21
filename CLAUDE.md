@@ -25,7 +25,7 @@
   - **真理図鑑**（旧・指針。2026年10月21日に作り直し）：人生で見つけた真理を集めて育てる図鑑。`StrategySection.tsx` と `src/components/strategy/`
     - 内部名（`strategies` 表・`StrategySection`・view `"strategy"`）は旧データ・バックアップ互換のため変えていない
     - 真理＝ kind "lesson"（一言）か "definition"（「〇〇とは」。detail が空なら「まだ見つけてない真理」）。名言は kind "quote" で別セクション
-    - 分野 `field`・出どころ `origin`・見つけた日 `foundDate`・きっかけのライフログ `lifeLogId`。旧データの分野は `INITIAL_FIELDS`（タイトルで引く）
+    - 分野 `fields`（複数可。分野の一覧は自分で編集でき appSettings の `truthFields`、初期は `DEFAULT_TRUTH_FIELDS`。id は変えない）・出どころ `origin`・見つけた日 `foundDate`・きっかけのライフログ `lifeLogId`。旧データの分野は `INITIAL_FIELDS`（タイトルで引く）、1つだけだった頃の `field` も読む
     - 「また実感した」は `notes`。確かさ＝1＋notes の数。番号 No.xxx は見つけた日順
     - ホームの「今日の真理」は日付ごとに同じ1つ（`pickOfTheDay`）
     - 一時期あった「気持ちから開く」入口は外した。`emotions`・`moodLogs`・`appSettings.customEmotions` はデータとして残してある（消さない）

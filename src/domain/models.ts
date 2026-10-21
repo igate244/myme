@@ -220,9 +220,37 @@ export const kindFromCategory = (category: StrategyCategory): StrategyKind =>
 export const categoryFromKind = (kind: StrategyKind): StrategyCategory =>
   kind === "quote" ? "impression" : kind === "definition" ? "definition" : "theory";
 
-/** 真理図鑑の分野 */
-export const TRUTH_FIELDS = ["work", "family", "money", "people", "body_mind", "life"] as const;
-export type TruthField = (typeof TRUTH_FIELDS)[number];
+/** 真理図鑑の分野。名前・色・並びは自分で編集できる（appSettings の truthFields に保存） */
+export interface TruthField {
+  id: string;
+  label: string;
+  color: string;
+}
+
+/** 最初から用意している分野。id は保存データに入るので変えないこと（名前は編集できる） */
+export const DEFAULT_TRUTH_FIELDS: TruthField[] = [
+  { id: "work", label: "仕事", color: "#8fb4d4" },
+  { id: "family", label: "家族", color: "#d9bd7a" },
+  { id: "money", label: "お金", color: "#8fc4a1" },
+  { id: "people", label: "人間関係", color: "#d39bb8" },
+  { id: "body_mind", label: "心と体", color: "#8cc5c0" },
+  { id: "life", label: "生き方", color: "#b4a0d8" },
+];
+
+/** 保存された分野の設定を読む。無ければ最初の6つ */
+export const normalizeTruthFields = (raw: unknown): TruthField[] => {
+  if (!Array.isArray(raw)) return DEFAULT_TRUTH_FIELDS;
+  const list = raw
+    .map((row) => {
+      const r = asRaw(row);
+      const id = str(r.id);
+      const label = str(r.label);
+      if (!id || !label) return null;
+      return { id, label, color: str(r.color) ?? "#8b8a87" };
+    })
+    .filter((f): f is TruthField => f !== null);
+  return list;
+};
 
 /** 真理の出どころ */
 export const TRUTH_ORIGINS = ["experience", "person", "book"] as const;
@@ -252,8 +280,8 @@ export interface StrategyItem {
   emotions: string[];
   pinned: boolean;
   notes: StrategyNote[];
-  /** 真理図鑑：分野・出どころ・見つけた日（YYYY-MM-DD）・きっかけになったライフログ */
-  field?: TruthField;
+  /** 真理図鑑：分野（複数可、TruthField の id）・出どころ・見つけた日（YYYY-MM-DD）・きっかけになったライフログ */
+  fields: string[];
   origin?: TruthOrigin;
   foundDate: string;
   lifeLogId?: string;
@@ -273,7 +301,7 @@ export interface StrategyItemInput {
   emotions: string[];
   pinned: boolean;
   notes: StrategyNote[];
-  field?: TruthField;
+  fields: string[];
   origin?: TruthOrigin;
   foundDate: string;
   lifeLogId?: string;
@@ -310,7 +338,14 @@ export const normalizeStrategyItem = (raw: unknown, fallbackUserId: string): Str
     pinned: typeof r.pinned === "boolean" ? r.pinned : strength === 3,
     notes: Array.isArray(r.notes) ? r.notes.map(normalizeStrategyNote) : [],
     // 分野・出どころが無い旧データは、最初の振り分け（下の表）と「自分の経験」を使う
-    field: typeof r.field === "string" ? oneOf(r.field, TRUTH_FIELDS, "life") : INITIAL_FIELDS[title.trim()],
+    // 分野は複数持てる（2026-10-21〜 fields）。1つだけだった頃の field と、最初の振り分けも読む
+    fields: Array.isArray(r.fields)
+      ? strArray(r.fields)
+      : typeof r.field === "string"
+        ? [r.field]
+        : INITIAL_FIELDS[title.trim()]
+          ? [INITIAL_FIELDS[title.trim()]]
+          : [],
     origin: typeof r.origin === "string" ? oneOf(r.origin, TRUTH_ORIGINS, "experience") : category === "impression" ? undefined : "experience",
     // 見つけた日が無い旧データは、書いた日を見つけた日にする
     foundDate: str(r.foundDate) ?? isoToLocalDate(str(r.createdAt)),
@@ -328,7 +363,7 @@ const isoToLocalDate = (iso: string | undefined): string => {
 };
 
 /** 2026年10月時点の真理への最初の分野付け（Claude が中身から振り分けた。スマホから直せる） */
-const INITIAL_FIELDS: Record<string, TruthField> = {
+const INITIAL_FIELDS: Record<string, string> = {
   "迷った時はわくわくする方を選択": "life",
   "瞑想すすめ": "body_mind",
   "1人で子育ては不可能、頼れる人に頼れる時に頼ろう": "family",
@@ -732,6 +767,8 @@ export interface ExportedData {
   /** 2026年10月に追加。古いバックアップには無い */
   moodLogs?: MoodLog[];
   customEmotions?: Emotion[];
+  /** 2026-10-21 に追加。自分で編集した真理図鑑の分野 */
+  truthFields?: TruthField[];
 }
 
 /** バックアップ JSON から配列を安全に取り出す */

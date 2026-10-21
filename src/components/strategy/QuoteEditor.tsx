@@ -43,7 +43,7 @@ const QuoteEditor: React.FC<Props> = ({ item, saving, onSave, onDelete, onClose 
       // 画面から外した項目も、消さずにそのまま持ち回す
       emotions: item?.emotions ?? [],
       notes: item?.notes ?? [],
-      field: item?.field,
+      fields: item?.fields ?? [],
       origin: item?.origin,
       foundDate: item?.foundDate || todayString(),
       lifeLogId: item?.lifeLogId,

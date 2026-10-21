@@ -12,7 +12,7 @@ import type {
   LegacyItem, LegacyItemInput,
   CounterItem, CounterItemInput, CounterLog,
   GrowthLog, FamilyMember,
-  MoodLog, Emotion,
+  MoodLog, Emotion, TruthField,
   ExportedData,
 } from "./models";
 
@@ -45,6 +45,8 @@ export interface LifeStore {
   deleteMoodLog(id: string): Promise<void>;
   getCustomEmotions(): Promise<Emotion[]>;
   saveCustomEmotions(emotions: Emotion[]): Promise<void>;
+  getTruthFields(): Promise<TruthField[]>;
+  saveTruthFields(fields: TruthField[]): Promise<void>;
 
   /* ------------------------------------------------------------ 人物図鑑 */
   getCompanions(userId: string): Promise<Companion[]>;
