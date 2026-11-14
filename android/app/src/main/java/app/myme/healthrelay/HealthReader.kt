@@ -2,12 +2,14 @@ package app.myme.healthrelay
 
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
@@ -35,6 +37,8 @@ data class DayData(
     val sleepStartMs: Long?,
     val sleepEndMs: Long?,
     val workoutsJson: String?,
+    val kcalTotal: Long? = null,
+    val kcalActive: Long? = null,
 ) {
     fun hasAny(): Boolean = (steps ?: 0L) > 0L || hrAvg != null || spo2Avg != null || sleepMin != null || workoutsJson != null
 
@@ -44,6 +48,8 @@ data class DayData(
         fun int(name: String, v: Long?) { if (v != null) f.put(name, JSONObject().put("integerValue", v.toString())) }
         fun dbl(name: String, v: Double?) { if (v != null) f.put(name, JSONObject().put("doubleValue", v)) }
         int("steps", steps)
+        int("kcalTotal", kcalTotal)
+        int("kcalActive", kcalActive)
         int("hrMin", hrMin)
         int("hrAvg", hrAvg)
         int("hrMax", hrMax)
@@ -77,6 +83,12 @@ object HealthReader {
     )
 
     /** バックグラウンド（アプリを開いていない間）の読み取り */
+    /** 消費カロリー（総・活動）を読む許可。無くても他の項目は同期できる */
+    val CALORIE_PERMISSIONS: Set<String> = setOf(
+        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
+    )
+
     /** 入れる前の古い記録（30日より前）も読める許可 */
     const val HISTORY_PERMISSION = "android.permission.health.READ_HEALTH_DATA_HISTORY"
 
@@ -209,8 +221,26 @@ object HealthReader {
             workouts.put(w)
         }
 
+        // 消費カロリー（許可が無い・取れないときは null）。総＝基礎代謝＋活動
+        var kcalTotal: Long? = null
+        var kcalActive: Long? = null
+        try {
+            val total = client.aggregate(
+                AggregateRequest(metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL), timeRangeFilter = range, dataOriginFilter = MI_ORIGINS),
+            )[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
+            val active = client.aggregate(
+                AggregateRequest(metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL), timeRangeFilter = range, dataOriginFilter = MI_ORIGINS),
+            )[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
+            kcalTotal = total?.inKilocalories?.let { Math.round(it) }
+            kcalActive = active?.inKilocalories?.let { Math.round(it) }
+        } catch (e: SecurityException) {
+            // 許可が出ていない
+        }
+
         return DayData(
             date = date.toString(),
+            kcalTotal = kcalTotal,
+            kcalActive = kcalActive,
             steps = stepsAgg[StepsRecord.COUNT_TOTAL],
             hrMin = hrMin,
             hrAvg = hrAvg,

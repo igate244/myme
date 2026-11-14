@@ -3,7 +3,7 @@
 // Firestore の SDK は gstatic から、「からだ」を開いたときだけ読み込む。
 // 取れたものは localStorage に控えて、オフラインでも前回の分を見られるようにする。
 
-import { encodePairingCode, normalizeBodyDayPlain } from "../domain/body";
+import { encodePairingCode, normalizeBodyDayPlain, normalizeRating } from "../domain/body";
 import type { BodyDay } from "../domain/body";
 import { loadAuth, loadFirestore } from "./firebaseClient";
 
@@ -58,4 +58,60 @@ export const makePairingCode = async (uid: string): Promise<string> => {
   const user = await currentUserOf(uid);
   if (!user.refreshToken) throw new Error("連携コードを作れませんでした。ログインし直してください");
   return encodePairingCode(uid, String(user.refreshToken));
+};
+
+/* ------------------------------------------------ その日の調子（users/{uid}/bodyRatings/{日付}） */
+
+const RATING_CACHE_KEY = "myme.bodyRatings";
+
+export type RatingMap = Record<string, number>;
+
+export const loadCachedRatings = (): RatingMap => {
+  try {
+    const raw = localStorage.getItem(RATING_CACHE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? (parsed as RatingMap) : {};
+  } catch {
+    return {};
+  }
+};
+
+const cacheRatings = (map: RatingMap): void => {
+  try {
+    localStorage.setItem(RATING_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    /* 控えられなくても困らない */
+  }
+};
+
+/** 付けた調子を全部読む（1日1件なので数はわずか） */
+export const fetchRatings = async (uid: string): Promise<RatingMap> => {
+  await currentUserOf(uid);
+  const { db, mod } = await loadFirestore();
+  const snap = await mod.getDocs(mod.collection(db, "users", uid, "bodyRatings"));
+  const map: RatingMap = {};
+  snap.docs.forEach((d: any) => {
+    const r = normalizeRating(d.data()?.rating);
+    if (r !== null) map[d.id] = r;
+  });
+  cacheRatings(map);
+  return map;
+};
+
+/** その日の調子を保存する。null で消す */
+export const saveRating = async (uid: string, date: string, rating: number | null): Promise<void> => {
+  await currentUserOf(uid);
+  const { db, mod } = await loadFirestore();
+  const ref = mod.doc(db, "users", uid, "bodyRatings", date);
+  if (rating === null) await mod.deleteDoc(ref);
+  else await mod.setDoc(ref, { rating, updatedAt: Date.now() });
+};
+
+/** 控えの調子を 1 日分だけ書き換える（保存の成功を待たず画面に出すため） */
+export const cacheRating = (map: RatingMap, date: string, rating: number | null): RatingMap => {
+  const next = { ...map };
+  if (rating === null) delete next[date];
+  else next[date] = rating;
+  cacheRatings(next);
+  return next;
 };

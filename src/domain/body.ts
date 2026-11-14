@@ -10,6 +10,10 @@ export type BodyDay = {
   /** YYYY-MM-DD（睡眠は起きた日に入る） */
   date: string;
   steps: number | null;
+  /** 総消費カロリー（基礎代謝＋活動）kcal */
+  kcalTotal: number | null;
+  /** 活動で使ったカロリー kcal */
+  kcalActive: number | null;
   hrMin: number | null;
   hrAvg: number | null;
   hrMax: number | null;
@@ -83,6 +87,8 @@ export const normalizeBodyDayPlain = (id: string, f: Record<string, unknown> | u
   return {
     date: id,
     steps: num(d.steps),
+    kcalTotal: num(d.kcalTotal),
+    kcalActive: num(d.kcalActive),
     hrMin: num(d.hrMin),
     hrAvg: num(d.hrAvg),
     hrMax: num(d.hrMax),
@@ -106,6 +112,15 @@ export const normalizeBodyDay = (id: string, fields: Record<string, FsValue> | u
   for (const [k, v] of Object.entries(fields ?? {})) f[k] = decodeFsValue(v);
   return normalizeBodyDayPlain(id, f);
 };
+
+/* ------------------------------------------------------ その日の調子（5段階） */
+
+/** 1〜5 の調子。自分で付ける記録なので、中継アプリの上書きに巻き込まれないよう別のコレクション（bodyRatings）に置く */
+export const RATING_LABELS: Record<number, string> = { 1: "だめ", 2: "いまいち", 3: "ふつう", 4: "いい", 5: "最高" };
+
+/** 1〜5 の整数だけ通す。それ以外は null */
+export const normalizeRating = (v: unknown): number | null =>
+  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
 
 /* ------------------------------------------------------------ 表示用の整形 */
 

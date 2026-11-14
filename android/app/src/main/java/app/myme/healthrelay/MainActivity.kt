@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
             status.text = "ヘルスコネクトが使えない状態です（Playストアで更新してください）。"
             return
         }
-        corePermissionLauncher.launch(HealthReader.CORE_PERMISSIONS)
+        corePermissionLauncher.launch(HealthReader.CORE_PERMISSIONS + HealthReader.CALORIE_PERMISSIONS)
     }
 
     private fun syncNow() {

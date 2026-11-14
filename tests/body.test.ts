@@ -53,3 +53,15 @@ test("SDK の data()（普通の値）からも同じ形になる", () => {
   assert.equal(day.workouts.length, 1);
   assert.equal(normalizeBodyDayPlain("x", undefined).steps, null);
 });
+
+test("消費カロリーと調子：カロリーは欠けていれば null、調子は 1〜5 の整数だけ", async () => {
+  const { normalizeRating } = await import("../src/domain/body.ts");
+  const day = normalizeBodyDay("2026-11-14", { kcalTotal: { integerValue: "2410" }, kcalActive: { integerValue: "520" } });
+  assert.equal(day.kcalTotal, 2410);
+  assert.equal(day.kcalActive, 520);
+  assert.equal(normalizeBodyDay("2026-11-14", {}).kcalTotal, null);
+  assert.equal(normalizeRating(4), 4);
+  assert.equal(normalizeRating(0), null);
+  assert.equal(normalizeRating(3.5), null);
+  assert.equal(normalizeRating("5"), null);
+});

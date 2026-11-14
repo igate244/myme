@@ -50,10 +50,10 @@ data class Pairing(val uid: String, val refreshToken: String) {
 
         /** 過去分をまとめて送る作業が済んでいるか */
         fun backfilled(ctx: Context): Boolean =
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("backfilled", false)
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("backfilled2", false)
 
         fun setBackfilled(ctx: Context) {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("backfilled", true).apply()
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("backfilled2", true).apply()
         }
 
         fun lastSync(ctx: Context): String? =

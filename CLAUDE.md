@@ -34,6 +34,8 @@
   - 元データは Firestore の `users/{uid}/health/{YYYY-MM-DD}`（中継アプリが書く）。**端末内 DB・バックアップには入れない**。見るたびに Firestore SDK（gstatic から動的 import）で読み、localStorage（`myme.bodyDays`）に控える
   - 中継アプリは `android/`（Kotlin・ヘルスコネクト読み取り）。`.github/workflows/android.yml` が APK をビルドして Releases の `relay-latest` に置く。フィールドの形を変えるときは `HealthReader.kt` の `toFields()` と `body.ts` の `normalizeBodyDay()` を両方直す
   - 連携コードは自分のアカウントの鍵。ログや画面に残さない
+  - 総消費カロリー（`kcalTotal`、活動分は `kcalActive`）は中継アプリ1.3から。
+  - **その日の調子（5段階）**は自分で付ける記録。`users/{uid}/bodyRatings/{YYYY-MM-DD}` の `rating`（1〜5）。中継アプリは health のドキュメントを丸ごと上書きするので、調子は health に混ぜず別コレクションに置いている。端末内 DB・ドライブのバックアップには入っていない
   - 記録は Firestore にずっと残す（期限なし）。画面は直近90日を読み、「さらに前を見る」で180日ずつ遡る。端末の控え（localStorage）は直近120日だけ。中継アプリは通常14日分を再送し、history 許可（v1.2〜）があれば初回だけ過去1年分を送る
 - `src/components/uiStyles.ts` 色・共通スタイル（ダーク・モノトーン＋差し色）
 - `src/domain/` データの形（models.ts）と保存の窓口（LifeStore.ts）
