@@ -32,9 +32,16 @@ export const loadCachedBodyDays = (): BodyDay[] => {
 export const fetchBodyDays = async (uid: string, days = 30): Promise<BodyDay[]> => {
   await currentUserOf(uid); // ログインの確認（Firestore のルールもこのログインで判定される）
   const { db, mod } = await loadFirestore();
-  const q = mod.query(mod.collection(db, "users", uid, "health"), mod.orderBy(mod.documentId(), "desc"), mod.limit(days));
+  // 並べ替え（新しい順）を Firestore に頼むと専用の索引が要るので、
+  // 日付の範囲だけ絞って取り、並べ替えは自分でやる（1日1件なので数もわずか）
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceId = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
+  const q = mod.query(mod.collection(db, "users", uid, "health"), mod.where(mod.documentId(), ">=", sinceId));
   const snap = await mod.getDocs(q);
-  const result: BodyDay[] = snap.docs.map((d: any) => normalizeBodyDayPlain(d.id, d.data()));
+  const result: BodyDay[] = snap.docs
+    .map((d: any) => normalizeBodyDayPlain(d.id, d.data()))
+    .sort((a: BodyDay, b: BodyDay) => (a.date < b.date ? 1 : -1));
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(result));
   } catch {
