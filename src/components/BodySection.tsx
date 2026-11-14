@@ -185,24 +185,34 @@ const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null)
   </div>
 );
 
-/** 直近7日の棒グラフ（平らな棒だけ。左が古い日。選んだ日は印をつける） */
-const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string }> = ({ days, ratings, selected }) => {
+/** 睡眠を棒の上に出す短い形（7時間54分 → 7h54） */
+const shortSleep = (min: number): string => `${Math.floor(min / 60)}h${String(Math.round(min % 60)).padStart(2, "0")}`;
+
+/** 直近7日の棒グラフ（平らな棒＋数字。左が古い日。押すとその日を開く） */
+const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string; onPick: (date: string) => void }> = ({ days, ratings, selected, onPick }) => {
   const week = days.slice(0, 7).reverse();
   if (week.length < 2) return null;
   const maxSteps = Math.max(1, ...week.map((d) => d.steps ?? 0));
   const maxSleep = Math.max(480, ...week.map((d) => d.sleepMin ?? 0));
   const cols = `repeat(${week.length}, minmax(0, 1fr))`;
-  const row = (title: string, value: (d: BodyDay) => number | null, max: number) => (
+  const row = (title: string, value: (d: BodyDay) => number | null, max: number, text: (v: number) => string) => (
     <div style={{ marginTop: 14 }}>
       <div style={{ fontSize: "0.72rem", color: TEXT_MUTED, marginBottom: 6 }}>{title}</div>
-      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 6, alignItems: "end", height: 56 }}>
+      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4, alignItems: "end", height: 78 }}>
         {week.map((d) => {
           const v = value(d);
+          const on = d.date === selected;
           return (
-            <div
+            <button
               key={d.date}
-              style={{ height: v === null ? 2 : Math.max(2, Math.round((v / max) * 56)), background: v === null ? LINE : ACCENT_BODY, opacity: d.date === selected || v === null ? 1 : 0.55, borderRadius: 2 }}
-            />
+              type="button"
+              onClick={() => onPick(d.date)}
+              aria-label={`${formatDayLabel(d.date)}を開く`}
+              style={{ all: "unset", boxSizing: "border-box", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "stretch", cursor: "pointer", minWidth: 0 }}
+            >
+              <span style={{ fontSize: "0.6rem", textAlign: "center", color: on ? TEXT_MAIN : TEXT_SUB, marginBottom: 3, whiteSpace: "nowrap" }}>{v === null ? "" : text(v)}</span>
+              <span style={{ display: "block", height: v === null ? 2 : Math.max(2, Math.round((v / max) * 50)), background: v === null ? LINE : ACCENT_BODY, opacity: on || v === null ? 1 : 0.55, borderRadius: 2 }} />
+            </button>
           );
         })}
       </div>
@@ -211,20 +221,242 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
   return (
     <div style={{ ...cardStyle, marginBottom: 0 }}>
       <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この7日</div>
-      {row("歩数", (d) => d.steps, maxSteps)}
-      {row("睡眠", (d) => d.sleepMin, maxSleep)}
-      {row("調子", (d) => ratings[d.date] ?? null, 5)}
-      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 6, marginTop: 8 }}>
+      {row("歩数", (d) => d.steps, maxSteps, (v) => v.toLocaleString("ja-JP"))}
+      {row("睡眠", (d) => d.sleepMin, maxSleep, shortSleep)}
+      {row("調子", (d) => ratings[d.date] ?? null, 5, (v) => String(v))}
+      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4, marginTop: 8 }}>
         {week.map((d) => {
           const [y, m, dd] = d.date.split("-").map(Number);
+          const on = d.date === selected;
           return (
-            <div key={d.date} style={{ textAlign: "center", fontSize: "0.68rem", color: d.date === selected ? TEXT_MAIN : TEXT_MUTED }}>
+            <button
+              key={d.date}
+              type="button"
+              onClick={() => onPick(d.date)}
+              style={{ all: "unset", boxSizing: "border-box", textAlign: "center", padding: "6px 0", fontSize: "0.68rem", lineHeight: 1.4, cursor: "pointer", color: on ? ACCENT_BODY : TEXT_MUTED, fontWeight: on ? 700 : 400, fontFamily: "inherit" }}
+            >
+              {m}/{dd}
+              <br />
               {WEEK[new Date(y, m - 1, dd).getDay()]}
-            </div>
+            </button>
           );
         })}
       </div>
     </div>
+  );
+};
+
+/* ------------------------------------------------------------ 項目ごとの詳しい画面 */
+
+type MetricKey = "steps" | "sleep" | "heart" | "spo2" | "kcal" | "rating";
+type Tab = "all" | MetricKey;
+
+type Metric = {
+  key: MetricKey;
+  label: string;
+  unit: string;
+  value: (d: BodyDay, r: RatingMap) => number | null;
+  /** 数字の見せ方（1日の値・平均など） */
+  text: (v: number) => string;
+  /** その日の補足（行の右側・大きい数字の下） */
+  sub: (d: BodyDay, r: RatingMap) => string;
+  /** 棒の高さの基準（最大値の下限）と、棒の下限（0 以外にしたい項目だけ） */
+  scaleMax: number;
+  floor: number;
+};
+
+const METRICS: Metric[] = [
+  {
+    key: "steps",
+    label: "歩数",
+    unit: "歩",
+    value: (d) => d.steps,
+    text: (v) => Math.round(v).toLocaleString("ja-JP"),
+    sub: (d) => (d.kcalActive == null ? "" : `活動 ${d.kcalActive.toLocaleString("ja-JP")} kcal`),
+    scaleMax: 1,
+    floor: 0,
+  },
+  {
+    key: "sleep",
+    label: "睡眠",
+    unit: "",
+    value: (d) => d.sleepMin,
+    text: (v) => formatMinutes(Math.round(v)),
+    sub: (d) => (d.sleepStartMs === null ? "" : `${formatClock(d.sleepStartMs)}〜${formatClock(d.sleepEndMs)}`),
+    scaleMax: 480,
+    floor: 0,
+  },
+  {
+    key: "heart",
+    label: "心拍",
+    unit: "回/分",
+    value: (d) => d.hrAvg,
+    text: (v) => String(Math.round(v)),
+    sub: (d) => (d.hrMin !== null && d.hrMax !== null ? `${d.hrMin}〜${d.hrMax}` : ""),
+    scaleMax: 100,
+    floor: 0,
+  },
+  {
+    key: "spo2",
+    label: "血中酸素",
+    unit: "%",
+    value: (d) => d.spo2Avg,
+    text: (v) => (Math.round(v * 10) / 10).toFixed(1),
+    sub: (d) => (d.spo2Min !== null ? `最低 ${Math.round(d.spo2Min)}%` : ""),
+    scaleMax: 100,
+    floor: 85, // 90% 台の差が見えるよう、85% からの高さにする
+  },
+  {
+    key: "kcal",
+    label: "カロリー",
+    unit: "kcal",
+    value: (d) => d.kcalActive,
+    text: (v) => Math.round(v).toLocaleString("ja-JP"),
+    sub: (d) => (d.kcalTotal == null ? "" : `総 ${d.kcalTotal.toLocaleString("ja-JP")}`),
+    scaleMax: 1,
+    floor: 0,
+  },
+  {
+    key: "rating",
+    label: "調子",
+    unit: "",
+    value: (d, r) => r[d.date] ?? null,
+    text: (v) => (Number.isInteger(v) ? `${v}（${RATING_LABELS[v]}）` : (Math.round(v * 10) / 10).toFixed(1)),
+    sub: () => "",
+    scaleMax: 5,
+    floor: 0,
+  },
+];
+
+const TABS: { key: Tab; label: string }[] = [{ key: "all", label: "すべて" }, ...METRICS.map((m) => ({ key: m.key as Tab, label: m.label }))];
+
+const TabBar: React.FC<{ tab: Tab; onChange: (t: Tab) => void }> = ({ tab, onChange }) => (
+  <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
+    {TABS.map((t) => {
+      const on = t.key === tab;
+      return (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onChange(t.key)}
+          aria-pressed={on}
+          style={{ all: "unset", boxSizing: "border-box", flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: "0.85rem", cursor: "pointer", fontFamily: "inherit", color: on ? "#111214" : TEXT_SUB, background: on ? ACCENT_BODY : SURFACE_2, border: `1px solid ${on ? ACCENT_BODY : LINE_2}` }}
+        >
+          {t.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
+const PERIODS: { n: number; label: string }[] = [
+  { n: 7, label: "7日" },
+  { n: 30, label: "30日" },
+  { n: 90, label: "90日" },
+  { n: 100000, label: "全部" },
+];
+
+/** 1つの項目を詳しく見る：選んだ日・期間の推移・平均/最高/最低・日ごとの一覧 */
+const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ratings: RatingMap; day: BodyDay; onPick: (date: string) => void }> = ({
+  metric,
+  days,
+  ratings,
+  day,
+  onPick,
+}) => {
+  const [period, setPeriod] = useState(30);
+  const list = days.slice(0, Math.min(period, days.length));
+  const withV = list.map((d) => ({ d, v: metric.value(d, ratings) }));
+  const values = withV.map((x) => x.v).filter((v): v is number => v !== null);
+  const avg = values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
+  const max = values.length === 0 ? null : Math.max(...values);
+  const min = values.length === 0 ? null : Math.min(...values);
+  const todayV = metric.value(day, ratings);
+  const scaleTop = Math.max(metric.scaleMax, max ?? 0);
+  const bars = [...withV].reverse(); // 左が古い日
+  const showNumbers = bars.length <= 7;
+  const barH = (v: number): number => Math.max(2, Math.round(((v - metric.floor) / (scaleTop - metric.floor)) * 90));
+  const stat = (label: string, v: number | null) => (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: "0.7rem", color: TEXT_MUTED }}>{label}</div>
+      <div style={{ fontSize: "0.95rem", marginTop: 2, color: TEXT_MAIN, wordBreak: "break-word" }}>{v === null ? "—" : metric.text(v)}</div>
+    </div>
+  );
+  return (
+    <>
+      <Tile label={`${formatDayLabel(day.date)}の${metric.label}`} value={todayV === null ? "—" : metric.text(todayV)} unit={metric.unit} sub={metric.sub(day, ratings) || undefined}>
+        {metric.key === "sleep" && <StageBar day={day} />}
+      </Tile>
+
+      <div style={{ ...cardStyle, marginBottom: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+          {PERIODS.map((p) => {
+            const on = p.n === period;
+            return (
+              <button
+                key={p.n}
+                type="button"
+                onClick={() => setPeriod(p.n)}
+                aria-pressed={on}
+                style={{ all: "unset", boxSizing: "border-box", textAlign: "center", padding: "8px 0", borderRadius: 8, fontSize: "0.82rem", cursor: "pointer", fontFamily: "inherit", color: on ? TEXT_MAIN : TEXT_MUTED, background: on ? SURFACE_2 : "transparent", border: `1px solid ${on ? LINE_2 : "transparent"}` }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, bars.length)}, minmax(0, 1fr))`, gap: bars.length > 30 ? 1 : 3, alignItems: "end", height: 120, marginTop: 14 }}>
+          {bars.map(({ d, v }) => {
+            const on = d.date === day.date;
+            return (
+              <button
+                key={d.date}
+                type="button"
+                onClick={() => onPick(d.date)}
+                aria-label={`${formatDayLabel(d.date)}を開く`}
+                style={{ all: "unset", boxSizing: "border-box", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", minWidth: 0 }}
+              >
+                {showNumbers && <span style={{ fontSize: "0.6rem", textAlign: "center", color: on ? TEXT_MAIN : TEXT_SUB, marginBottom: 3, whiteSpace: "nowrap" }}>{v === null ? "" : metric.key === "sleep" ? shortSleep(v) : metric.text(v).split("（")[0]}</span>}
+                <span style={{ display: "block", height: v === null ? 2 : barH(v), background: v === null ? LINE : ACCENT_BODY, opacity: on || v === null ? 1 : 0.55, borderRadius: 1 }} />
+              </button>
+            );
+          })}
+        </div>
+        {bars.length > 1 && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: "0.68rem", color: TEXT_MUTED }}>
+            <span>{formatDayLabel(bars[0].d.date)}</span>
+            <span>{formatDayLabel(bars[bars.length - 1].d.date)}</span>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${LINE}` }}>
+          {stat("平均", avg)}
+          {stat("最高", max)}
+          {stat("最低", min)}
+        </div>
+        <div style={{ marginTop: 8, fontSize: "0.7rem", color: TEXT_MUTED }}>{values.length}日分の記録</div>
+      </div>
+
+      <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 6px" }}>
+        <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600, paddingBottom: 6 }}>日ごと</div>
+        {withV.map(({ d, v }) => (
+          <button
+            key={d.date}
+            type="button"
+            onClick={() => onPick(d.date)}
+            style={{ all: "unset", boxSizing: "border-box", width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr)", gap: 8, alignItems: "baseline", padding: "12px 2px", borderTop: `1px solid ${LINE}`, cursor: "pointer", color: d.date === day.date ? ACCENT_BODY : TEXT_MAIN, fontFamily: "inherit" }}
+          >
+            <span style={{ fontSize: "0.88rem" }}>{formatDayLabel(d.date)}</span>
+            <span style={{ fontSize: "0.88rem", textAlign: "right" }}>
+              {v === null ? "—" : metric.text(v)}
+              {v !== null && metric.unit && <span style={{ color: TEXT_MUTED, fontSize: "0.7rem" }}> {metric.unit}</span>}
+            </span>
+            <span style={{ fontSize: "0.78rem", textAlign: "right", color: TEXT_SUB, wordBreak: "break-word" }}>{metric.sub(d, ratings)}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 };
 
@@ -275,6 +507,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   const [days, setDays] = useState<BodyDay[]>(() => loadCachedBodyDays());
   const [ratings, setRatings] = useState<RatingMap>(() => loadCachedRatings());
   const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState(90);
@@ -367,25 +600,36 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                 <NavButton label="›" disabled={index <= 0} onClick={() => setSelected(days[index - 1].date)} />
               </div>
 
-              <DayView day={day} />
-              <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
-              <WeekBars days={days} ratings={ratings} selected={day.date} />
+              <TabBar tab={tab} onChange={setTab} />
 
-              <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 6px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6 }}>
-                  <span style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>これまで</span>
-                  <span style={{ fontSize: "0.7rem", color: TEXT_MUTED }}>歩数　睡眠　調子</span>
-                </div>
-                {days.map((d, i) => {
-                  const newMonth = i === 0 || monthOf(days[i - 1].date) !== monthOf(d.date);
-                  return (
-                    <React.Fragment key={d.date}>
-                      {newMonth && <div style={{ fontSize: "0.72rem", color: ACCENT_BODY, margin: i === 0 ? "6px 0 2px" : "18px 0 2px" }}>{monthOf(d.date)}</div>}
-                      <HistoryRow day={d} rating={ratings[d.date] ?? null} active={d.date === day.date} onPick={() => pick(d.date)} />
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+              {tab === "all" ? (
+                <>
+                  <DayView day={day} />
+                  <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
+                  <WeekBars days={days} ratings={ratings} selected={day.date} onPick={pick} />
+
+                  <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6 }}>
+                      <span style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>これまで</span>
+                      <span style={{ fontSize: "0.7rem", color: TEXT_MUTED }}>歩数　睡眠　調子</span>
+                    </div>
+                    {days.map((d, i) => {
+                      const newMonth = i === 0 || monthOf(days[i - 1].date) !== monthOf(d.date);
+                      return (
+                        <React.Fragment key={d.date}>
+                          {newMonth && <div style={{ fontSize: "0.72rem", color: ACCENT_BODY, margin: i === 0 ? "6px 0 2px" : "18px 0 2px" }}>{monthOf(d.date)}</div>}
+                          <HistoryRow day={d} rating={ratings[d.date] ?? null} active={d.date === day.date} onPick={() => pick(d.date)} />
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <MetricDetail metric={METRICS.find((m) => m.key === tab) as Metric} days={days} ratings={ratings} day={day} onPick={pick} />
+                  {tab === "rating" && <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />}
+                </>
+              )}
 
               <button type="button" disabled={loading} onClick={() => setRange((r) => r + 180)} style={{ ...secondaryButtonStyle, width: "100%" }}>
                 {loading ? "読み込み中…" : "さらに前を見る"}
