@@ -85,4 +85,54 @@ object FirestoreClient {
         )
         if (code !in 200..299) throw IOException("書き込みに失敗しました（$code）${text.take(120)}")
     }
+
+    private fun getText(url: String, bearer: String): Pair<Int, String> {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.requestMethod = "GET"
+            c.connectTimeout = 15000
+            c.readTimeout = 30000
+            c.setRequestProperty("Authorization", "Bearer $bearer")
+            val code = c.responseCode
+            val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+            return code to text
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /**
+     * 部屋の温湿度を users/{uid}/room/{日付} の文字列 s に1行足す。形は「分,気温,湿度;分,気温,湿度;…」
+     * （分＝エポックからの分）。health とは別の場所なので、からだの記録の上書きに巻き込まれない
+     */
+    fun appendRoomSample(session: Session, date: String, epochMin: Long, temp: Double, hum: Int) {
+        val base = "projects/$PROJECT/databases/(default)/documents"
+        val docPath = "users/${session.uid}/room/$date"
+        val (code, text) = getText("https://firestore.googleapis.com/v1/$base/$docPath", session.idToken)
+        val old = when (code) {
+            200 -> JSONObject(text).optJSONObject("fields")?.optJSONObject("s")?.optString("stringValue", "") ?: ""
+            404 -> ""
+            else -> throw IOException("部屋の記録を読めませんでした（$code）")
+        }
+        val entry = "$epochMin,${"%.1f".format(java.util.Locale.US, temp)},$hum"
+        if (old.split(";").any { it.substringBefore(",") == epochMin.toString() }) return
+        val next = if (old.isEmpty()) entry else "$old;$entry"
+        val write = JSONObject()
+            .put(
+                "update",
+                JSONObject().put("name", "$base/$docPath").put(
+                    "fields",
+                    JSONObject()
+                        .put("s", JSONObject().put("stringValue", next))
+                        .put("updatedAt", JSONObject().put("integerValue", System.currentTimeMillis().toString())),
+                ),
+            )
+        val (wc, wt) = post(
+            "https://firestore.googleapis.com/v1/$base:commit",
+            "application/json",
+            JSONObject().put("writes", org.json.JSONArray().put(write)).toString(),
+            session.idToken,
+        )
+        if (wc !in 200..299) throw IOException("部屋の記録を書けませんでした（$wc）${wt.take(120)}")
+    }
 }

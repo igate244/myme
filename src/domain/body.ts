@@ -113,6 +113,37 @@ export const normalizeBodyDay = (id: string, fields: Record<string, FsValue> | u
   return normalizeBodyDayPlain(id, f);
 };
 
+/* ------------------------------------------------------ 部屋の温湿度（SwitchBot） */
+
+/** 中継アプリが users/{uid}/room/{日付} の文字列 s に貯める「分,気温,湿度;分,気温,湿度;…」（分＝エポックからの分） */
+export type RoomSample = { ms: number; temp: number; hum: number };
+
+export const parseRoomSamples = (raw: unknown): RoomSample[] => {
+  if (typeof raw !== "string" || raw === "") return [];
+  const out: RoomSample[] = [];
+  for (const part of raw.split(";")) {
+    const [m, t, h] = part.split(",").map(Number);
+    if (Number.isFinite(m) && Number.isFinite(t) && Number.isFinite(h)) out.push({ ms: m * 60000, temp: t, hum: h });
+  }
+  return out.sort((a, b) => a.ms - b.ms);
+};
+
+export type RoomSummary = { tempAvg: number; tempMin: number; tempMax: number; humAvg: number; count: number };
+
+/** startMs〜endMs の間の記録をまとめる。1件も無ければ null */
+export const summarizeRoom = (samples: RoomSample[], startMs: number, endMs: number): RoomSummary | null => {
+  const inside = samples.filter((x) => x.ms >= startMs && x.ms <= endMs);
+  if (inside.length === 0) return null;
+  const temps = inside.map((x) => x.temp);
+  return {
+    tempAvg: temps.reduce((a, b) => a + b, 0) / temps.length,
+    tempMin: Math.min(...temps),
+    tempMax: Math.max(...temps),
+    humAvg: inside.reduce((a, x) => a + x.hum, 0) / inside.length,
+    count: inside.length,
+  };
+};
+
 /* ------------------------------------------------------ その日の調子（5段階） */
 
 /** 1〜5 の調子。自分で付ける記録なので、中継アプリの上書きに巻き込まれないよう別のコレクション（bodyRatings）に置く */

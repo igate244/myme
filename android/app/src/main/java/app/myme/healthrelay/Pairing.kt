@@ -56,6 +56,26 @@ data class Pairing(val uid: String, val refreshToken: String) {
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("backfilled2", true).apply()
         }
 
+        /** SwitchBot のトークンとシークレット（この端末の中だけに置く） */
+        fun saveSwitchBot(ctx: Context, token: String, secret: String) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString("sbToken", token).putString("sbSecret", secret).remove("sbDevice").apply()
+        }
+
+        fun loadSwitchBot(ctx: Context): Pair<String, String>? {
+            val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val t = p.getString("sbToken", null) ?: return null
+            val s = p.getString("sbSecret", null) ?: return null
+            return t to s
+        }
+
+        fun switchBotDevice(ctx: Context): String? =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("sbDevice", null)
+
+        fun saveSwitchBotDevice(ctx: Context, id: String) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("sbDevice", id).apply()
+        }
+
         fun lastSync(ctx: Context): String? =
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("lastSync", null)
     }

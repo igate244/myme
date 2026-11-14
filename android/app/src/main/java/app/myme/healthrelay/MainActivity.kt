@@ -26,6 +26,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var status: TextView
     private lateinit var codeInput: EditText
+    private lateinit var sbToken: EditText
+    private lateinit var sbSecret: EditText
 
     private val permissionContract = PermissionController.createRequestPermissionResultContract()
 
@@ -58,6 +60,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SyncWorker.schedule(this)
+        RoomWorker.schedule(this)
         setContentView(buildView())
         refreshStatus()
     }
@@ -114,7 +117,37 @@ class MainActivity : ComponentActivity() {
         root.addView(label("普段は6時間おきに自動で送ります。すぐ送りたいときはこちら。"))
         root.addView(button("今すぐ同期") { syncNow() })
 
+        root.addView(label("④ 部屋の温湿度（SwitchBot）", 16f, Color.BLACK))
+        root.addView(label("SwitchBot アプリの開発者向けオプションにあるトークンとシークレットを貼ります。30分おきに温湿度を貯めて、MYME の睡眠に出します。"))
+        sbToken = EditText(this).apply { hint = "トークン"; setSingleLine(true); textSize = 12f }
+        sbSecret = EditText(this).apply { hint = "シークレット"; setSingleLine(true); textSize = 12f }
+        root.addView(sbToken, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(sbSecret, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(button("SwitchBot を保存して試す") { saveSwitchBot() })
+
         return ScrollView(this).apply { addView(root) }
+    }
+
+    private fun saveSwitchBot() {
+        val token = sbToken.text.toString().trim()
+        val secret = sbSecret.text.toString().trim()
+        if (token.isEmpty() || secret.isEmpty()) {
+            status.text = "トークンとシークレットの両方を貼ってください。"
+            return
+        }
+        Pairing.saveSwitchBot(this, token, secret)
+        sbToken.setText("")
+        sbSecret.setText("")
+        status.text = "温湿度を読んでいます…"
+        lifecycleScope.launch {
+            val message = try {
+                "部屋の温湿度：" + (RoomSampler.run(this@MainActivity) ?: "鍵が入っていません")
+            } catch (e: Exception) {
+                "SwitchBot：失敗（${e.message}）"
+            }
+            Pairing.saveLastSync(this@MainActivity, message)
+            refreshStatus()
+        }
     }
 
     private fun saveCode() {
@@ -140,7 +173,9 @@ class MainActivity : ComponentActivity() {
         status.text = "同期中…"
         lifecycleScope.launch {
             val message = try {
-                Syncer.run(this@MainActivity)
+                val health = Syncer.run(this@MainActivity)
+                val room = try { RoomSampler.run(this@MainActivity) } catch (e: Exception) { "失敗（${e.message}）" }
+                if (room == null) health else "$health／部屋 $room"
             } catch (e: Exception) {
                 "失敗：${e.message}"
             }
@@ -153,6 +188,7 @@ class MainActivity : ComponentActivity() {
         val paired = Pairing.load(this) != null
         val lines = ArrayList<String>()
         lines.add(if (paired) "連携コード：入っています" else "連携コード：まだです（①）")
+        lines.add(if (Pairing.loadSwitchBot(this) != null) "SwitchBot：入っています" else "SwitchBot：まだです（④・なくても使えます）")
         lines.add(
             when (HealthConnectClient.getSdkStatus(this)) {
                 HealthConnectClient.SDK_AVAILABLE -> "ヘルスコネクト：使えます"

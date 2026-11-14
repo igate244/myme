@@ -116,3 +116,43 @@ export const cacheRating = (map: RatingMap, date: string, rating: number | null)
   cacheRatings(next);
   return next;
 };
+
+/* ------------------------------------------------ 部屋の温湿度（users/{uid}/room/{日付}、中継アプリが書く） */
+
+const ROOM_CACHE_KEY = "myme.roomDays";
+/** 日付 → 貯めた文字列（形は domain/body.ts の parseRoomSamples を見る） */
+export type RoomDocs = Record<string, string>;
+
+export const loadCachedRoomDocs = (): RoomDocs => {
+  try {
+    const raw = localStorage.getItem(ROOM_CACHE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? (parsed as RoomDocs) : {};
+  } catch {
+    return {};
+  }
+};
+
+/** 今日から days 日前（夜をまたぐ分として＋1日）まで。控えには新しい側の120日だけ残す */
+export const fetchRoomDocs = async (uid: string, days: number): Promise<RoomDocs> => {
+  await currentUserOf(uid);
+  const { db, mod } = await loadFirestore();
+  const since = new Date();
+  since.setDate(since.getDate() - days - 1);
+  const sinceId = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
+  const snap = await mod.getDocs(mod.query(mod.collection(db, "users", uid, "room"), mod.where(mod.documentId(), ">=", sinceId)));
+  const docs: RoomDocs = {};
+  snap.docs.forEach((d: any) => {
+    const v = d.data()?.s;
+    if (typeof v === "string") docs[d.id] = v;
+  });
+  try {
+    const keep = Object.keys(docs).sort().slice(-CACHE_DAYS);
+    const cut: RoomDocs = {};
+    keep.forEach((k) => (cut[k] = docs[k]));
+    localStorage.setItem(ROOM_CACHE_KEY, JSON.stringify(cut));
+  } catch {
+    /* 控えられなくても困らない */
+  }
+  return docs;
+};

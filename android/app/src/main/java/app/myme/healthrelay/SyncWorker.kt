@@ -38,3 +38,28 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         }
     }
 }
+
+/** 30分おきに、部屋の温湿度（SwitchBot）を貯める */
+class RoomWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+
+    override suspend fun doWork(): Result =
+        try {
+            RoomSampler.run(applicationContext)
+            Result.success()
+        } catch (e: IOException) {
+            Result.retry()
+        } catch (e: Exception) {
+            Result.success()
+        }
+
+    companion object {
+        private const val NAME = "myme-room-sample"
+
+        fun schedule(ctx: Context) {
+            val request = PeriodicWorkRequestBuilder<RoomWorker>(30, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+        }
+    }
+}

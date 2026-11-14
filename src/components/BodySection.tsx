@@ -3,16 +3,18 @@
 // データは Firestore（users/{uid}/health）にあり、中継アプリ（android/）が毎日送ってくる。
 // ここでは読んで見せるだけ。端末内の DB には入れない。
 // その日の調子（5段階）は自分で付ける記録で、users/{uid}/bodyRatings に保存する（中継アプリの上書きに巻き込まれない）。
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
-import type { BodyDay } from "../domain/body";
-import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, workoutName } from "../domain/body";
-import type { RatingMap } from "../infrastructure/bodyRemote";
+import type { BodyDay, RoomSummary } from "../domain/body";
+import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, summarizeRoom, workoutName } from "../domain/body";
+import type { RatingMap, RoomDocs } from "../infrastructure/bodyRemote";
 import {
   cacheRating,
   fetchBodyDays,
   fetchRatings,
+  fetchRoomDocs,
   loadCachedBodyDays,
+  loadCachedRoomDocs,
   loadCachedRatings,
   makePairingCode,
   saveRating,
@@ -104,9 +106,7 @@ const StageBar: React.FC<{ day: BodyDay }> = ({ day }) => {
 };
 
 /** 選んだ日のまとめ */
-const DayView: React.FC<{ day: BodyDay }> = ({ day }) => {
-  const heart = day.hrAvg === null ? "—" : String(day.hrAvg);
-  const heartSub = day.hrMin !== null && day.hrMax !== null ? `${day.hrMin}〜${day.hrMax} 回/分` : undefined;
+const DayView: React.FC<{ day: BodyDay; room?: RoomSummary }> = ({ day, room }) => {
   const spo2 = day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg));
   const spo2Sub = day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined;
   const kcalSub =
@@ -124,7 +124,7 @@ const DayView: React.FC<{ day: BodyDay }> = ({ day }) => {
         >
           <StageBar day={day} />
         </Tile>
-        <Tile label="心拍（平均）" value={heart} unit="回/分" sub={heartSub} />
+        <Tile label="睡眠中の部屋" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `湿度 ${Math.round(room.humAvg)}%` : "SwitchBot を中継アプリに入れると出ます"} />
         <Tile label="血中酸素" value={spo2} unit="%" sub={spo2Sub} />
       </div>
       {day.workouts.length > 0 && (
@@ -248,18 +248,21 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
 
 /* ------------------------------------------------------------ 項目ごとの詳しい画面 */
 
-type MetricKey = "steps" | "sleep" | "heart" | "spo2" | "kcal" | "rating";
+/** 項目の値を出すときに使う、日ごとの付け足しデータ */
+type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary> };
+
+type MetricKey = "steps" | "sleep" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 type Tab = "all" | MetricKey;
 
 type Metric = {
   key: MetricKey;
   label: string;
   unit: string;
-  value: (d: BodyDay, r: RatingMap) => number | null;
+  value: (d: BodyDay, c: Ctx) => number | null;
   /** 数字の見せ方（1日の値・平均など） */
   text: (v: number) => string;
   /** その日の補足（行の右側・大きい数字の下） */
-  sub: (d: BodyDay, r: RatingMap) => string;
+  sub: (d: BodyDay, c: Ctx) => string;
   /** 棒の高さの基準（最大値の下限）と、棒の下限（0 以外にしたい項目だけ） */
   scaleMax: number;
   floor: number;
@@ -282,18 +285,12 @@ const METRICS: Metric[] = [
     unit: "",
     value: (d) => d.sleepMin,
     text: (v) => formatMinutes(Math.round(v)),
-    sub: (d) => (d.sleepStartMs === null ? "" : `${formatClock(d.sleepStartMs)}〜${formatClock(d.sleepEndMs)}`),
+    sub: (d, c) => {
+      const r = c.room[d.date];
+      const t = d.sleepStartMs === null ? "" : `${formatClock(d.sleepStartMs)}〜${formatClock(d.sleepEndMs)}`;
+      return r ? `${t}　${r.tempAvg.toFixed(1)}℃ ${Math.round(r.humAvg)}%` : t;
+    },
     scaleMax: 480,
-    floor: 0,
-  },
-  {
-    key: "heart",
-    label: "心拍",
-    unit: "回/分",
-    value: (d) => d.hrAvg,
-    text: (v) => String(Math.round(v)),
-    sub: (d) => (d.hrMin !== null && d.hrMax !== null ? `${d.hrMin}〜${d.hrMax}` : ""),
-    scaleMax: 100,
     floor: 0,
   },
   {
@@ -317,10 +314,33 @@ const METRICS: Metric[] = [
     floor: 0,
   },
   {
+    key: "roomTemp",
+    label: "室温",
+    unit: "℃",
+    value: (d, c) => c.room[d.date]?.tempAvg ?? null,
+    text: (v) => v.toFixed(1),
+    sub: (d, c) => {
+      const r = c.room[d.date];
+      return r ? `${r.tempMin.toFixed(1)}〜${r.tempMax.toFixed(1)}` : "";
+    },
+    scaleMax: 30,
+    floor: 10, // 睡眠中の室温の差が見えるよう、10℃ からの高さにする
+  },
+  {
+    key: "roomHum",
+    label: "湿度",
+    unit: "%",
+    value: (d, c) => c.room[d.date]?.humAvg ?? null,
+    text: (v) => String(Math.round(v)),
+    sub: (d, c) => (c.room[d.date] ? `室温 ${c.room[d.date].tempAvg.toFixed(1)}℃` : ""),
+    scaleMax: 100,
+    floor: 0,
+  },
+  {
     key: "rating",
     label: "調子",
     unit: "",
-    value: (d, r) => r[d.date] ?? null,
+    value: (d, c) => c.ratings[d.date] ?? null,
     text: (v) => (Number.isInteger(v) ? `${v}（${RATING_LABELS[v]}）` : (Math.round(v * 10) / 10).toFixed(1)),
     sub: () => "",
     scaleMax: 5,
@@ -356,22 +376,64 @@ const PERIODS: { n: number; label: string }[] = [
   { n: 100000, label: "全部" },
 ];
 
+/** 睡眠中の室温が高めの晩と低めの晩で、睡眠がどう違うか（記録が6晩たまってから出す） */
+const RoomLink: React.FC<{ days: BodyDay[]; ctx: Ctx }> = ({ days, ctx }) => {
+  const nights = days
+    .map((d) => ({ d, r: ctx.room[d.date] }))
+    .filter((x): x is { d: BodyDay; r: RoomSummary } => x.r !== undefined && x.d.sleepMin !== null && x.d.sleepMin > 0);
+  if (nights.length < 6) {
+    return (
+      <div style={{ ...cardStyle, marginBottom: 0, fontSize: "0.8rem", color: TEXT_MUTED, lineHeight: 1.7 }}>
+        睡眠と室温の関係は、部屋の記録がついた晩が6晩たまると出ます（いま{nights.length}晩）。
+      </div>
+    );
+  }
+  const sorted = [...nights].sort((a, b) => a.r.tempAvg - b.r.tempAvg);
+  const half = Math.floor(sorted.length / 2);
+  const low = sorted.slice(0, half);
+  const high = sorted.slice(sorted.length - half);
+  const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const col = (title: string, xs: typeof nights) => {
+    const deep = xs.filter((x) => x.d.deepMin !== null).map((x) => ((x.d.deepMin as number) / (x.d.sleepMin as number)) * 100);
+    return (
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: "0.72rem", color: TEXT_MUTED }}>{title}（{xs.length}晩）</div>
+        <div style={{ fontSize: "0.82rem", color: TEXT_SUB, marginTop: 2 }}>
+          {avg(xs.map((x) => x.r.tempAvg)).toFixed(1)}℃ ／ 湿度 {Math.round(avg(xs.map((x) => x.r.humAvg)))}%
+        </div>
+        <div style={{ fontSize: "1rem", color: TEXT_MAIN, marginTop: 6 }}>{formatMinutes(Math.round(avg(xs.map((x) => x.d.sleepMin as number))))}</div>
+        <div style={{ fontSize: "0.78rem", color: TEXT_SUB, marginTop: 2 }}>深い睡眠 {deep.length === 0 ? "—" : `${Math.round(avg(deep))}%`}</div>
+      </div>
+    );
+  };
+  return (
+    <div style={{ ...cardStyle, marginBottom: 0 }}>
+      <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600, marginBottom: 10 }}>室温と睡眠</div>
+      <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 14 }}>
+        {col("低めの晩", low)}
+        {col("高めの晩", high)}
+      </div>
+      <div style={{ marginTop: 10, fontSize: "0.7rem", color: TEXT_MUTED, lineHeight: 1.6 }}>室温の低い半分と高い半分に分けた平均です。晩数が少ないうちは目安として。</div>
+    </div>
+  );
+};
+
 /** 1つの項目を詳しく見る：選んだ日・期間の推移・平均/最高/最低・日ごとの一覧 */
-const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ratings: RatingMap; day: BodyDay; onPick: (date: string) => void }> = ({
+const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (date: string) => void }> = ({
   metric,
   days,
-  ratings,
+  ctx,
   day,
   onPick,
 }) => {
   const [period, setPeriod] = useState(30);
   const list = days.slice(0, Math.min(period, days.length));
-  const withV = list.map((d) => ({ d, v: metric.value(d, ratings) }));
+  const withV = list.map((d) => ({ d, v: metric.value(d, ctx) }));
   const values = withV.map((x) => x.v).filter((v): v is number => v !== null);
   const avg = values.length === 0 ? null : values.reduce((a, b) => a + b, 0) / values.length;
   const max = values.length === 0 ? null : Math.max(...values);
   const min = values.length === 0 ? null : Math.min(...values);
-  const todayV = metric.value(day, ratings);
+  const todayV = metric.value(day, ctx);
   const scaleTop = Math.max(metric.scaleMax, max ?? 0);
   const bars = [...withV].reverse(); // 左が古い日
   const showNumbers = bars.length <= 7;
@@ -384,9 +446,11 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ratings: RatingM
   );
   return (
     <>
-      <Tile label={`${formatDayLabel(day.date)}の${metric.label}`} value={todayV === null ? "—" : metric.text(todayV)} unit={metric.unit} sub={metric.sub(day, ratings) || undefined}>
+      <Tile label={`${formatDayLabel(day.date)}の${metric.label}`} value={todayV === null ? "—" : metric.text(todayV)} unit={metric.unit} sub={metric.sub(day, ctx) || undefined}>
         {metric.key === "sleep" && <StageBar day={day} />}
       </Tile>
+
+      {metric.key === "sleep" && <RoomLink days={days} ctx={ctx} />}
 
       <div style={{ ...cardStyle, marginBottom: 0 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
@@ -452,7 +516,7 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ratings: RatingM
               {v === null ? "—" : metric.text(v)}
               {v !== null && metric.unit && <span style={{ color: TEXT_MUTED, fontSize: "0.7rem" }}> {metric.unit}</span>}
             </span>
-            <span style={{ fontSize: "0.78rem", textAlign: "right", color: TEXT_SUB, wordBreak: "break-word" }}>{metric.sub(d, ratings)}</span>
+            <span style={{ fontSize: "0.78rem", textAlign: "right", color: TEXT_SUB, wordBreak: "break-word" }}>{metric.sub(d, ctx)}</span>
           </button>
         ))}
       </div>
@@ -506,6 +570,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   const { user } = useAuth();
   const [days, setDays] = useState<BodyDay[]>(() => loadCachedBodyDays());
   const [ratings, setRatings] = useState<RatingMap>(() => loadCachedRatings());
+  const [roomDocs, setRoomDocs] = useState<RoomDocs>(() => loadCachedRoomDocs());
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const [loading, setLoading] = useState(true);
@@ -519,9 +584,14 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
     setLoading(true);
     setError(null);
     try {
-      const [loaded, loadedRatings] = await Promise.all([fetchBodyDays(user.uid, range), fetchRatings(user.uid).catch(() => null)]);
+      const [loaded, loadedRatings, loadedRoom] = await Promise.all([
+        fetchBodyDays(user.uid, range),
+        fetchRatings(user.uid).catch(() => null),
+        fetchRoomDocs(user.uid, range).catch(() => null),
+      ]);
       setDays(loaded);
       if (loadedRatings) setRatings(loadedRatings);
+      if (loadedRoom) setRoomDocs(loadedRoom);
     } catch (e) {
       console.error(e);
       const errCode = e instanceof Error ? ((e as { code?: string }).code ?? e.message) : String(e);
@@ -538,6 +608,19 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 睡眠の時間帯（寝た〜起きた）の部屋の平均。部屋の記録が無い晩は入らない
+  const room = useMemo(() => {
+    const samples = Object.values(roomDocs).flatMap((raw) => parseRoomSamples(raw));
+    const out: Record<string, RoomSummary> = {};
+    for (const d of days) {
+      if (d.sleepStartMs === null || d.sleepEndMs === null) continue;
+      const r = summarizeRoom(samples, d.sleepStartMs, d.sleepEndMs);
+      if (r) out[d.date] = r;
+    }
+    return out;
+  }, [roomDocs, days]);
+  const ctx: Ctx = useMemo(() => ({ ratings, room }), [ratings, room]);
 
   const index = Math.max(0, days.findIndex((d) => d.date === selected)); // 未選択・見つからないときは最新日
   const day: BodyDay | undefined = days[index];
@@ -604,7 +687,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
 
               {tab === "all" ? (
                 <>
-                  <DayView day={day} />
+                  <DayView day={day} room={room[day.date]} />
                   <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
                   <WeekBars days={days} ratings={ratings} selected={day.date} onPick={pick} />
 
@@ -626,7 +709,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                 </>
               ) : (
                 <>
-                  <MetricDetail metric={METRICS.find((m) => m.key === tab) as Metric} days={days} ratings={ratings} day={day} onPick={pick} />
+                  <MetricDetail metric={METRICS.find((m) => m.key === tab) as Metric} days={days} ctx={ctx} day={day} onPick={pick} />
                   {tab === "rating" && <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />}
                 </>
               )}

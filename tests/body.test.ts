@@ -65,3 +65,19 @@ test("消費カロリーと調子：カロリーは欠けていれば null、調
   assert.equal(normalizeRating(3.5), null);
   assert.equal(normalizeRating("5"), null);
 });
+
+test("部屋の温湿度：文字列を読み、睡眠の時間帯だけ平均する。壊れた行は飛ばす", async () => {
+  const { parseRoomSamples, summarizeRoom } = await import("../src/domain/body.ts");
+  const samples = parseRoomSamples("100,24.0,50;130,25.0,60;oops;160,26.0,70;300,10.0,10");
+  assert.equal(samples.length, 4);
+  assert.equal(samples[0].ms, 100 * 60000);
+  const r = summarizeRoom(samples, 100 * 60000, 160 * 60000);
+  assert.ok(r);
+  assert.equal(r.count, 3);
+  assert.equal(r.tempAvg, 25);
+  assert.equal(r.tempMin, 24);
+  assert.equal(r.tempMax, 26);
+  assert.equal(r.humAvg, 60);
+  assert.equal(summarizeRoom(samples, 1000 * 60000, 2000 * 60000), null);
+  assert.deepEqual(parseRoomSamples(undefined), []);
+});
