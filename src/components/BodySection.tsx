@@ -110,12 +110,12 @@ const DayView: React.FC<{ day: BodyDay }> = ({ day }) => {
   const spo2 = day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg));
   const spo2Sub = day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined;
   const kcalSub =
-    day.kcalTotal == null ? "中継アプリ1.3で許可すると入ります" : day.kcalActive != null ? `うち活動 ${day.kcalActive.toLocaleString("ja-JP")}` : undefined;
+    day.kcalActive == null ? "中継アプリ1.3で許可すると入ります" : day.kcalTotal != null ? `総消費 ${day.kcalTotal.toLocaleString("ja-JP")} kcal` : undefined;
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
         <Tile label="歩数" value={stepsText(day)} unit="歩" />
-        <Tile label="消費カロリー" value={day.kcalTotal == null ? "—" : day.kcalTotal.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
+        <Tile label="活動中の消費カロリー" value={day.kcalActive == null ? "—" : day.kcalActive.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
         <Tile
           wide
           label="睡眠"
