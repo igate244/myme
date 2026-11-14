@@ -6,13 +6,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { BodyDay, RoomSummary } from "../domain/body";
-import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, summarizeRoom, workoutName } from "../domain/body";
+import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
 import type { RatingMap, RoomDocs } from "../infrastructure/bodyRemote";
 import {
   cacheRating,
   fetchBodyDays,
   fetchRatings,
   fetchRoomDocs,
+  importRoomSamples,
   loadCachedBodyDays,
   loadCachedRoomDocs,
   loadCachedRatings,
@@ -578,6 +579,8 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   const [range, setRange] = useState(90);
   const [code, setCode] = useState<string | null>(null);
   const [codeMessage, setCodeMessage] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -640,6 +643,27 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   const pick = (date: string): void => {
     setSelected(date);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const importCsv = async (file: File | undefined): Promise<void> => {
+    if (!user || !file) return;
+    setImporting(true);
+    setImportMessage("読み込み中…");
+    try {
+      const samples = parseSwitchBotCsv(await file.text());
+      if (samples.length === 0) {
+        setImportMessage("温度と湿度の列が見つかりませんでした。SwitchBot の履歴の書き出しファイルか確認してください。");
+        return;
+      }
+      const dayCount = await importRoomSamples(user.uid, samples);
+      setImportMessage(`${samples.length}件（${dayCount}日分）を取り込みました。`);
+      await load();
+    } catch (e) {
+      console.error(e);
+      setImportMessage(`取り込めませんでした（${e instanceof Error ? ((e as { code?: string }).code ?? e.message) : String(e)}）`);
+    } finally {
+      setImporting(false);
+    }
   };
 
   const showCode = async (): Promise<void> => {
@@ -745,6 +769,26 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                 </>
               )}
               {codeMessage && <p style={{ margin: "10px 0 0", fontSize: "0.8rem", color: TEXT_MUTED }}>{codeMessage}</p>}
+            </div>
+            <div style={{ ...cardStyle, marginBottom: 0, marginTop: 10 }}>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: TEXT_SUB, lineHeight: 1.7 }}>
+                SwitchBot の履歴（CSV）から、過去の部屋の温湿度を取り込みます。同じ時刻の分は重ならないので、何度入れても大丈夫。
+              </p>
+              <label style={{ ...secondaryButtonStyle, display: "block", textAlign: "center", boxSizing: "border-box", marginTop: 12, width: "100%", opacity: importing ? 0.6 : 1 }}>
+                {importing ? "取り込み中…" : "CSV を選んで取り込む"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  disabled={importing}
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.currentTarget.files?.[0];
+                    e.currentTarget.value = "";
+                    void importCsv(f);
+                  }}
+                />
+              </label>
+              {importMessage && <p style={{ margin: "10px 0 0", fontSize: "0.8rem", color: TEXT_MUTED }}>{importMessage}</p>}
             </div>
           </section>
         </div>

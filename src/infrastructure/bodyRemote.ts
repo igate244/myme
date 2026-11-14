@@ -3,7 +3,8 @@
 // Firestore の SDK は gstatic から、「からだ」を開いたときだけ読み込む。
 // 取れたものは localStorage に控えて、オフラインでも前回の分を見られるようにする。
 
-import { encodePairingCode, normalizeBodyDayPlain, normalizeRating } from "../domain/body";
+import { encodePairingCode, groupRoomByDate, mergeRoomStrings, normalizeBodyDayPlain, normalizeRating } from "../domain/body";
+import type { RoomSample } from "../domain/body";
 import type { BodyDay } from "../domain/body";
 import { loadAuth, loadFirestore } from "./firebaseClient";
 
@@ -155,4 +156,26 @@ export const fetchRoomDocs = async (uid: string, days: number): Promise<RoomDocs
     /* 控えられなくても困らない */
   }
   return docs;
+};
+
+/** SwitchBot の履歴（CSV）から読んだ記録を、日ごとに合わせて保存する。もうある分とは同じ分を1つにして合わせるので、何度入れても増えない。入れた日数を返す */
+export const importRoomSamples = async (uid: string, samples: RoomSample[]): Promise<number> => {
+  await currentUserOf(uid);
+  const { db, mod } = await loadFirestore();
+  const grouped = groupRoomByDate(samples);
+  const existing = await mod.getDocs(mod.collection(db, "users", uid, "room"));
+  const have: RoomDocs = {};
+  existing.docs.forEach((d: any) => {
+    if (typeof d.data()?.s === "string") have[d.id] = d.data().s;
+  });
+  const dates = Object.keys(grouped);
+  for (let i = 0; i < dates.length; i += 400) {
+    const batch = mod.writeBatch(db);
+    for (const date of dates.slice(i, i + 400)) {
+      const s = have[date] ? mergeRoomStrings(have[date], grouped[date]) : grouped[date];
+      batch.set(mod.doc(db, "users", uid, "room", date), { s, updatedAt: Date.now() }, { merge: true });
+    }
+    await batch.commit();
+  }
+  return dates.length;
 };

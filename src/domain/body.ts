@@ -128,6 +128,53 @@ export const parseRoomSamples = (raw: unknown): RoomSample[] => {
   return out.sort((a, b) => a.ms - b.ms);
 };
 
+/** SwitchBot アプリの履歴の書き出し（CSV）を読む。日時は端末の時刻（日本）として扱う。列は見出しの名前で探す */
+export const parseSwitchBotCsv = (text: string): RoomSample[] => {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length < 2) return [];
+  const head = lines[0].split(",").map((h) => h.trim());
+  const iDate = head.findIndex((h) => /^date/i.test(h));
+  const iTemp = head.findIndex((h) => /^temperature/i.test(h));
+  const iHum = head.findIndex((h) => /humidity/i.test(h) && !/^abs/i.test(h) && /^relative|^humidity/i.test(h));
+  if (iDate < 0 || iTemp < 0 || iHum < 0) return [];
+  const out: RoomSample[] = [];
+  for (const line of lines.slice(1)) {
+    const c = line.split(",");
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/.exec((c[iDate] ?? "").trim());
+    const temp = Number(c[iTemp]);
+    const hum = Number(c[iHum]);
+    if (!m || !Number.isFinite(temp) || !Number.isFinite(hum) || c[iTemp].trim() === "" || c[iHum].trim() === "") continue;
+    const ms = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])).getTime();
+    out.push({ ms, temp, hum });
+  }
+  return out.sort((a, b) => a.ms - b.ms);
+};
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** 記録を日付（端末の時刻）ごとの文字列に分ける。形は parseRoomSamples が読むものと同じ */
+export const groupRoomByDate = (samples: RoomSample[]): Record<string, string> => {
+  const parts: Record<string, string[]> = {};
+  for (const x of samples) {
+    const d = new Date(x.ms);
+    const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    (parts[key] ??= []).push(`${Math.round(x.ms / 60000)},${x.temp.toFixed(1)},${Math.round(x.hum)}`);
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parts)) out[k] = v.join(";");
+  return out;
+};
+
+/** 2つの文字列を、同じ分の記録は1つにして合わせる（先にある方を残す） */
+export const mergeRoomStrings = (a: string, b: string): string => {
+  const seen = new Map<number, RoomSample>();
+  for (const x of [...parseRoomSamples(b), ...parseRoomSamples(a)]) seen.set(Math.round(x.ms / 60000), x);
+  return [...seen.entries()]
+    .sort((x, y) => x[0] - y[0])
+    .map(([m, x]) => `${m},${x.temp.toFixed(1)},${Math.round(x.hum)}`)
+    .join(";");
+};
+
 export type RoomSummary = { tempAvg: number; tempMin: number; tempMax: number; humAvg: number; count: number };
 
 /** startMs〜endMs の間の記録をまとめる。1件も無ければ null */

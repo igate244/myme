@@ -81,3 +81,19 @@ test("部屋の温湿度：文字列を読み、睡眠の時間帯だけ平均�
   assert.equal(summarizeRoom(samples, 1000 * 60000, 2000 * 60000), null);
   assert.deepEqual(parseRoomSamples(undefined), []);
 });
+
+test("SwitchBot の履歴CSV：列を見出しで探し、日ごとの文字列に分け、同じ分は重ねずに合わせる", async () => {
+  const { parseSwitchBotCsv, groupRoomByDate, mergeRoomStrings, parseRoomSamples } = await import("../src/domain/body.ts");
+  const csv = "Date,Temperature_Celsius(℃),Relative_Humidity(%),DPT(℃),VPD(kPa),Abs Humidity(g/m³),Light_Value\n2025-11-15 07:28,21.8,57,12.9,1.12,10.94,12\n2025-11-15 07:58,22.4,57,13.5,1.16,11.32,12\n2025-11-16 00:28,,,,,,\nbad line\n";
+  const samples = parseSwitchBotCsv(csv);
+  assert.equal(samples.length, 2);
+  assert.equal(samples[0].ms, new Date(2025, 10, 15, 7, 28).getTime());
+  assert.equal(samples[0].temp, 21.8);
+  assert.equal(samples[0].hum, 57);
+  const grouped = groupRoomByDate(samples);
+  assert.deepEqual(Object.keys(grouped), ["2025-11-15"]);
+  assert.equal(parseRoomSamples(grouped["2025-11-15"]).length, 2);
+  const merged = mergeRoomStrings(grouped["2025-11-15"], grouped["2025-11-15"] + ";" + Math.round(new Date(2025, 10, 15, 8, 0).getTime() / 60000) + ",23.0,55");
+  assert.equal(parseRoomSamples(merged).length, 3);
+  assert.deepEqual(parseSwitchBotCsv("a,b\n1,2"), []);
+});
