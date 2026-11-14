@@ -121,7 +121,14 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary }> = ({ day, room }) 
           wide
           label="睡眠"
           value={sleepText(day)}
-          sub={day.sleepStartMs === null ? undefined : `${formatClock(day.sleepStartMs)} 〜 ${formatClock(day.sleepEndMs)}`}
+          sub={
+            [
+              day.sleepStartMs === null ? "" : `${formatClock(day.sleepStartMs)} 〜 ${formatClock(day.sleepEndMs)}`,
+              day.hrSleepAvg == null ? "" : `睡眠中の心拍 平均${day.hrSleepAvg}${day.hrSleepMin != null ? `・最低${day.hrSleepMin}` : ""}`,
+            ]
+              .filter(Boolean)
+              .join("　") || undefined
+          }
         >
           <StageBar day={day} />
         </Tile>
@@ -252,7 +259,7 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
 /** 項目の値を出すときに使う、日ごとの付け足しデータ */
 type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary> };
 
-type MetricKey = "steps" | "sleep" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
+type MetricKey = "steps" | "sleep" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 type Tab = "all" | MetricKey;
 
 type Metric = {
@@ -293,6 +300,16 @@ const METRICS: Metric[] = [
     },
     scaleMax: 480,
     floor: 0,
+  },
+  {
+    key: "sleepHr",
+    label: "睡眠中心拍",
+    unit: "回/分",
+    value: (d) => d.hrSleepAvg,
+    text: (v) => String(Math.round(v)),
+    sub: (d) => (d.hrSleepMin != null ? `最低 ${d.hrSleepMin}` : ""),
+    scaleMax: 80,
+    floor: 30, // 40〜70 台の差が見えるよう、30 からの高さにする
   },
   {
     key: "spo2",

@@ -24,7 +24,7 @@ export const loadCachedBodyDays = (): BodyDay[] => {
     const raw = localStorage.getItem(CACHE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     // 古い控え（カロリー項目が無かった頃）でも落ちないよう、欠けた項目は null で埋める
-    return Array.isArray(parsed) ? (parsed as BodyDay[]).map((d) => ({ ...d, kcalTotal: d.kcalTotal ?? null, kcalActive: d.kcalActive ?? null })) : [];
+    return Array.isArray(parsed) ? (parsed as BodyDay[]).map((d) => ({ ...d, kcalTotal: d.kcalTotal ?? null, kcalActive: d.kcalActive ?? null, hrSleepAvg: d.hrSleepAvg ?? null, hrSleepMin: d.hrSleepMin ?? null })) : [];
   } catch {
     return [];
   }

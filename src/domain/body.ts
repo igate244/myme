@@ -10,6 +10,9 @@ export type BodyDay = {
   /** YYYY-MM-DD（睡眠は起きた日に入る） */
   date: string;
   steps: number | null;
+  /** 睡眠中の心拍（平均・最低）回/分。最低は安静時心拍の目安 */
+  hrSleepAvg: number | null;
+  hrSleepMin: number | null;
   /** 総消費カロリー（基礎代謝＋活動）kcal */
   kcalTotal: number | null;
   /** 活動で使ったカロリー kcal */
@@ -87,6 +90,8 @@ export const normalizeBodyDayPlain = (id: string, f: Record<string, unknown> | u
   return {
     date: id,
     steps: num(d.steps),
+    hrSleepAvg: num(d.hrSleepAvg),
+    hrSleepMin: num(d.hrSleepMin),
     kcalTotal: num(d.kcalTotal),
     kcalActive: num(d.kcalActive),
     hrMin: num(d.hrMin),

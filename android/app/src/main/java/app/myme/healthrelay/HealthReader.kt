@@ -37,6 +37,8 @@ data class DayData(
     val sleepStartMs: Long?,
     val sleepEndMs: Long?,
     val workoutsJson: String?,
+    val hrSleepAvg: Long? = null,
+    val hrSleepMin: Long? = null,
     val kcalTotal: Long? = null,
     val kcalActive: Long? = null,
 ) {
@@ -48,6 +50,8 @@ data class DayData(
         fun int(name: String, v: Long?) { if (v != null) f.put(name, JSONObject().put("integerValue", v.toString())) }
         fun dbl(name: String, v: Double?) { if (v != null) f.put(name, JSONObject().put("doubleValue", v)) }
         int("steps", steps)
+        int("hrSleepAvg", hrSleepAvg)
+        int("hrSleepMin", hrSleepMin)
         int("kcalTotal", kcalTotal)
         int("kcalActive", kcalActive)
         int("hrMin", hrMin)
@@ -192,6 +196,19 @@ object HealthReader {
         // 眠っていた時間。段階の記録があればその合計、なければ寝ていた時間の全体
         val sleepMin = if (kept.isEmpty()) null else if (hasStages) deep + light + rem + plainSleep else wholeMin
 
+        // 睡眠中の心拍（寝た〜起きた）。Mi Fitness は心拍を主に睡眠中に書くので、1日全体ではなくこの時間帯で読む
+        var hrSleepAvg: Long? = null
+        var hrSleepMin: Long? = null
+        if (kept.isNotEmpty()) {
+            val from = kept.first().startTime
+            val to = kept.last().endTime
+            val first = heartInWindow(client, from, to, MI_ORIGINS)
+            // Mi 由来で取れなければ、取り込み元の指定なしでもう一度（取り込み元の名前が違っていた場合の保険）
+            val result = if (first.first != null) first else heartInWindow(client, from, to, emptySet())
+            hrSleepAvg = result.first
+            hrSleepMin = result.second
+        }
+
         // 運動
         val workouts = JSONArray()
         val exercises = client.readRecords(
@@ -239,6 +256,8 @@ object HealthReader {
 
         return DayData(
             date = date.toString(),
+            hrSleepAvg = hrSleepAvg,
+            hrSleepMin = hrSleepMin,
             kcalTotal = kcalTotal,
             kcalActive = kcalActive,
             steps = stepsAgg[StepsRecord.COUNT_TOTAL],
@@ -256,6 +275,21 @@ object HealthReader {
             sleepEndMs = kept.lastOrNull()?.endTime?.toEpochMilli(),
             workoutsJson = if (workouts.length() == 0) null else workouts.toString(),
         )
+    }
+
+    /** 指定の時間帯の心拍（平均, 最低）。集計で取れなければ、記録の中身（サンプル）から自分で出す */
+    private suspend fun heartInWindow(client: HealthConnectClient, from: java.time.Instant, to: java.time.Instant, origins: Set<DataOrigin>): Pair<Long?, Long?> {
+        val range = TimeRangeFilter.between(from, to)
+        val agg = client.aggregate(
+            AggregateRequest(metrics = setOf(HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MIN), timeRangeFilter = range, dataOriginFilter = origins),
+        )
+        val avg = agg[HeartRateRecord.BPM_AVG]
+        if (avg != null) return avg to agg[HeartRateRecord.BPM_MIN]
+        val bpms = client.readRecords(
+            ReadRecordsRequest(recordType = HeartRateRecord::class, timeRangeFilter = range, dataOriginFilter = origins),
+        ).records.flatMap { r -> r.samples.filter { !it.time.isBefore(from) && it.time.isBefore(to) }.map { it.beatsPerMinute } }
+        if (bpms.isEmpty()) return null to null
+        return Math.round(bpms.average()) to bpms.min()
     }
 
     /** 確認用：最近の歩数が、どのアプリ由来で入っているか */
