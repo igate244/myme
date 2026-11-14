@@ -1,7 +1,7 @@
 // 「からだ」のデータ変換（Firestore の REST の形 → 画面で使う形）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay } from "../src/domain/body.ts";
+import { decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
 
 test("Firestore の値：整数は文字列で来るので数値にする", () => {
   assert.equal(decodeFsValue({ integerValue: "8229" }), 8229);
@@ -43,4 +43,13 @@ test("連携コード：base64url で、中身を読み戻せる", () => {
   assert.match(code, /^[A-Za-z0-9_-]+$/);
   const json = JSON.parse(Buffer.from(code.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
   assert.deepEqual(json, { v: 1, u: "uid123", r: "refresh/token+abc==" });
+});
+
+test("SDK の data()（普通の値）からも同じ形になる", () => {
+  const day = normalizeBodyDayPlain("2026-11-13", { steps: 8229, spo2Avg: 96.5, workouts: JSON.stringify([{ t: 56, s: 1, e: 2 }]) });
+  assert.equal(day.steps, 8229);
+  assert.equal(day.spo2Avg, 96.5);
+  assert.equal(day.hrAvg, null);
+  assert.equal(day.workouts.length, 1);
+  assert.equal(normalizeBodyDayPlain("x", undefined).steps, null);
 });

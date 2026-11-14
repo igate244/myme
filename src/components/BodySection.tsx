@@ -96,7 +96,10 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
       setDays(await fetchBodyDays(user.uid));
     } catch (e) {
       console.error(e);
-      setError(days.length > 0 ? "最新を読み込めなかったので、前回の分を出しています。" : "読み込めませんでした。電波の良いところでもう一度。");
+      const code = e instanceof Error ? ((e as { code?: string }).code ?? e.message) : String(e);
+      setError(
+        `${days.length > 0 ? "最新を読み込めなかったので、前回の分を出しています。" : "読み込めませんでした。電波の良いところでもう一度。"}（${code}）`,
+      );
     } finally {
       setLoading(false);
     }

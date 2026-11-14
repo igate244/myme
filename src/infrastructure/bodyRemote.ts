@@ -1,15 +1,13 @@
 // src/infrastructure/bodyRemote.ts — 「からだ」のデータを Firestore から読む
 //
-// Firebase SDK の Firestore は読み込まず、REST で必要な分だけ取る（ログインの ID トークンを付ける）。
+// Firestore の SDK は gstatic から、「からだ」を開いたときだけ読み込む。
 // 取れたものは localStorage に控えて、オフラインでも前回の分を見られるようにする。
 
-import { FIREBASE_CONFIG } from "../config";
-import { encodePairingCode, normalizeBodyDay } from "../domain/body";
-import type { BodyDay, FsValue } from "../domain/body";
-import { loadAuth } from "./firebaseClient";
+import { encodePairingCode, normalizeBodyDayPlain } from "../domain/body";
+import type { BodyDay } from "../domain/body";
+import { loadAuth, loadFirestore } from "./firebaseClient";
 
 const CACHE_KEY = "myme.bodyDays";
-const BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const currentUserOf = async (uid: string): Promise<any> => {
@@ -32,27 +30,11 @@ export const loadCachedBodyDays = (): BodyDay[] => {
 
 /** 新しい日から days 日分を取る。取れたら控えも更新する */
 export const fetchBodyDays = async (uid: string, days = 30): Promise<BodyDay[]> => {
-  const user = await currentUserOf(uid);
-  const token: string = await user.getIdToken();
-  const res = await fetch(`${BASE}/users/${encodeURIComponent(uid)}:runQuery`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId: "health" }],
-        orderBy: [{ field: { fieldPath: "__name__" }, direction: "DESCENDING" }],
-        limit: days,
-      },
-    }),
-  });
-  if (!res.ok) throw new Error(`読み込みに失敗しました（${res.status}）`);
-  const rows: Array<{ document?: { name: string; fields?: Record<string, FsValue> } }> = await res.json();
-  const result = rows
-    .filter((row) => row.document)
-    .map((row) => {
-      const doc = row.document!;
-      return normalizeBodyDay(doc.name.split("/").pop() ?? "", doc.fields);
-    });
+  await currentUserOf(uid); // ログインの確認（Firestore のルールもこのログインで判定される）
+  const { db, mod } = await loadFirestore();
+  const q = mod.query(mod.collection(db, "users", uid, "health"), mod.orderBy(mod.documentId(), "desc"), mod.limit(days));
+  const snap = await mod.getDocs(q);
+  const result: BodyDay[] = snap.docs.map((d: any) => normalizeBodyDayPlain(d.id, d.data()));
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(result));
   } catch {

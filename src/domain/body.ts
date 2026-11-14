@@ -77,28 +77,34 @@ const parseWorkouts = (raw: unknown): Workout[] => {
   }
 };
 
-/** Firestore のドキュメント（id = 日付、fields = REST の形）を BodyDay にする。欠けている項目は null */
+/** 普通の値になったドキュメント（SDK の data()）を BodyDay にする。欠けている項目は null */
+export const normalizeBodyDayPlain = (id: string, f: Record<string, unknown> | undefined): BodyDay => {
+  const d = f ?? {};
+  return {
+    date: id,
+    steps: num(d.steps),
+    hrMin: num(d.hrMin),
+    hrAvg: num(d.hrAvg),
+    hrMax: num(d.hrMax),
+    spo2Avg: num(d.spo2Avg),
+    spo2Min: num(d.spo2Min),
+    sleepMin: num(d.sleepMin),
+    deepMin: num(d.deepMin),
+    lightMin: num(d.lightMin),
+    remMin: num(d.remMin),
+    awakeMin: num(d.awakeMin),
+    sleepStartMs: num(d.sleepStartMs),
+    sleepEndMs: num(d.sleepEndMs),
+    workouts: parseWorkouts(d.workouts),
+    updatedAt: num(d.updatedAt),
+  };
+};
+
+/** Firestore のドキュメント（id = 日付、fields = REST の形）を BodyDay にする */
 export const normalizeBodyDay = (id: string, fields: Record<string, FsValue> | undefined): BodyDay => {
   const f: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields ?? {})) f[k] = decodeFsValue(v);
-  return {
-    date: id,
-    steps: num(f.steps),
-    hrMin: num(f.hrMin),
-    hrAvg: num(f.hrAvg),
-    hrMax: num(f.hrMax),
-    spo2Avg: num(f.spo2Avg),
-    spo2Min: num(f.spo2Min),
-    sleepMin: num(f.sleepMin),
-    deepMin: num(f.deepMin),
-    lightMin: num(f.lightMin),
-    remMin: num(f.remMin),
-    awakeMin: num(f.awakeMin),
-    sleepStartMs: num(f.sleepStartMs),
-    sleepEndMs: num(f.sleepEndMs),
-    workouts: parseWorkouts(f.workouts),
-    updatedAt: num(f.updatedAt),
-  };
+  return normalizeBodyDayPlain(id, f);
 };
 
 /* ------------------------------------------------------------ 表示用の整形 */

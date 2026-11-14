@@ -29,3 +29,24 @@ export const loadAuth = (): Promise<AuthSdk> => {
   }
   return sdkPromise;
 };
+
+export type FirestoreSdk = { db: any; mod: any };
+
+let firestorePromise: Promise<FirestoreSdk> | null = null;
+
+/** Firestore（「からだ」のデータを読むときだけ使う）。ログインと同じアプリに繋ぐ */
+export const loadFirestore = (): Promise<FirestoreSdk> => {
+  if (!firestorePromise) {
+    firestorePromise = (async () => {
+      await loadAuth(); // アプリの初期化とログイン状態の復元を先に済ませる
+      const appMod: any = await import(/* @vite-ignore */ `${FIREBASE_SDK}/firebase-app.js`);
+      const mod: any = await import(/* @vite-ignore */ `${FIREBASE_SDK}/firebase-firestore.js`);
+      const db = mod.getFirestore(appMod.getApps()[0]);
+      return { db, mod };
+    })();
+    firestorePromise.catch(() => {
+      firestorePromise = null;
+    });
+  }
+  return firestorePromise;
+};
