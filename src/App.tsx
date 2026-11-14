@@ -17,6 +17,7 @@ import QuoteSection from "./components/QuoteSection";
 import ProfileSection from "./components/ProfileSection";
 import LegacySection from "./components/LegacySection";
 import GrowthSection from "./components/GrowthSection";
+import BodySection from "./components/BodySection";
 import AuthScreen from "./components/AuthScreen";
 import { AutoBackupManager } from "./components/AutoBackupManager";
 import { outerStyle, cardStyle, primaryButtonStyle, secondaryButtonStyle, sectionTitleStyle, DANGER_COLOR } from "./components/uiStyles";
@@ -34,6 +35,7 @@ const SECTIONS: Record<SectionView, React.FC<{ onBack: () => void }>> = {
   profile: ProfileSection,
   legacy: LegacySection,
   growth: GrowthSection,
+  body: BodySection,
 };
 
 const centeredScreenStyle: React.CSSProperties = {

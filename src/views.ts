@@ -7,6 +7,7 @@ export type SectionView =
   | "quotes"
   | "profile"
   | "legacy"
-  | "growth";
+  | "growth"
+  | "body";
 
 export type View = "home" | SectionView;

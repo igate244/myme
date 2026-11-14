@@ -30,6 +30,10 @@
     - ホームの「今日の真理」は日付ごとに同じ1つ（`pickOfTheDay`）
     - 一時期あった「気持ちから開く」入口は外した。`emotions`・`moodLogs`・`appSettings.customEmotions` はデータとして残してある（消さない）
   - 人物名鑑は「人間図鑑」アプリ、カウンターは「KEEP」アプリに独立したので画面から外した。**データ（DB の表・バックアップ）は残してある**
+- **からだ**（2026-11-14）：スマートバンドの記録を見る画面。`BodySection.tsx`、データの形と変換は `src/domain/body.ts`、読み込みは `src/infrastructure/bodyRemote.ts`
+  - 元データは Firestore の `users/{uid}/health/{YYYY-MM-DD}`（中継アプリが書く）。**端末内 DB・バックアップには入れない**。見るたびに REST で読み、localStorage（`myme.bodyDays`）に控える
+  - 中継アプリは `android/`（Kotlin・ヘルスコネクト読み取り）。`.github/workflows/android.yml` が APK をビルドして Releases の `relay-latest` に置く。フィールドの形を変えるときは `HealthReader.kt` の `toFields()` と `body.ts` の `normalizeBodyDay()` を両方直す
+  - 連携コードは自分のアカウントの鍵。ログや画面に残さない
 - `src/components/uiStyles.ts` 色・共通スタイル（ダーク・モノトーン＋差し色）
 - `src/domain/` データの形（models.ts）と保存の窓口（LifeStore.ts）
 - `src/infrastructure/` IndexedDB（Dexie）実装、Google ドライブ（drive.file、`MYME_Backup` フォルダ、30世代）、Firebase Auth の読み込み

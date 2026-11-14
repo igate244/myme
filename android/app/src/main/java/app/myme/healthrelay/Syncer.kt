@@ -1,0 +1,43 @@
+package app.myme.healthrelay
+
+import android.content.Context
+import androidx.health.connect.client.HealthConnectClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.ZoneId
+
+object Syncer {
+
+    /** 直近 days 日分をヘルスコネクトから読んで Firestore に送る。結果の短い説明を返す */
+    suspend fun run(ctx: Context, days: Int = 7): String = withContext(Dispatchers.IO) {
+        val pairing = Pairing.load(ctx) ?: throw IllegalStateException("連携コードがまだ入っていません")
+        if (HealthConnectClient.getSdkStatus(ctx) != HealthConnectClient.SDK_AVAILABLE) {
+            throw IllegalStateException("ヘルスコネクトが使えません")
+        }
+        val client = HealthConnectClient.getOrCreate(ctx)
+        val granted = client.permissionController.getGrantedPermissions()
+        if (!granted.containsAll(HealthReader.CORE_PERMISSIONS)) {
+            throw IllegalStateException("ヘルスコネクトの許可が足りません（アプリを開いて「許可する」）")
+        }
+
+        val session = FirestoreClient.signIn(pairing)
+        if (session.refreshToken != pairing.refreshToken) Pairing.save(ctx, Pairing(pairing.uid, session.refreshToken))
+
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val all = (0 until days).map { HealthReader.readDay(client, today.minusDays(it.toLong()), zone) }
+        val withData = all.filter { it.hasAny() }
+        FirestoreClient.writeDays(session, withData)
+
+        val stepDays = withData.count { (it.steps ?: 0L) > 0L }
+        var text = "${withData.size}日分を送信（歩数あり${stepDays}日）"
+        if (stepDays == 0) {
+            // 歩数が1日も取れないときは、取り込み元の名前を見せて原因を探しやすくする
+            val origins = try { HealthReader.recentOrigins(client, zone) } catch (e: Exception) { emptySet() }
+            text += "／歩数の取り込み元：${origins.joinToString().ifEmpty { "なし" }}"
+        }
+        Pairing.saveLastSync(ctx, text)
+        text
+    }
+}

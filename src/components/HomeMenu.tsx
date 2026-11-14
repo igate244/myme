@@ -37,6 +37,7 @@ const MENU_ITEMS: MenuItem[] = [
   { view: "strategy", title: "真理図鑑", desc: "人生で見つけた真理", icon: "📜" },
   { view: "quotes", title: "名言", desc: "刺さった言葉", icon: "💬" },
   { view: "legacy", title: "遺すもの", desc: "手紙・思い出", icon: "✉️" },
+  { view: "body", title: "からだ", desc: "歩数・睡眠・心拍", icon: "🫀" },
   { view: "profile", title: "自分", desc: "プロフィール・設定", icon: "👤", wide: true },
 ];
 

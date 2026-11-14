@@ -1,0 +1,47 @@
+# android/（バンドの記録を MYME に送る中継アプリ）をビルドして、GitHub の Releases に置く。
+# スマホで https://github.com/igate244/myme/releases/tag/relay-latest を開いて myme-health-relay.apk を入れる。
+name: android-relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+      - name: ビルド
+        working-directory: android
+        run: gradle --no-daemon assembleRelease
+      - name: APK をそろえる
+        working-directory: android
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/myme-health-relay.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: myme-health-relay
+          path: android/out/myme-health-relay.apk
+      - name: Releases に置く
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: relay-latest
+          name: MYME 中継アプリ（最新）
+          body: バンドの記録をヘルスコネクトから MYME に送るアプリ。myme-health-relay.apk をスマホで開いて入れる。
+          files: android/out/myme-health-relay.apk
+          make_latest: false

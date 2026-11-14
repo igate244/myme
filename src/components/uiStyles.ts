@@ -32,6 +32,7 @@ export const SECTION_COLORS = {
   quotes: "#c9b48a",
   legacy: "#d1a0c4",
   profile: "#8cc5c0",
+  body: "#d9a38a",
 } as const;
 
 export const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif';
