@@ -77,6 +77,9 @@ object HealthReader {
     )
 
     /** バックグラウンド（アプリを開いていない間）の読み取り */
+    /** 入れる前の古い記録（30日より前）も読める許可 */
+    const val HISTORY_PERMISSION = "android.permission.health.READ_HEALTH_DATA_HISTORY"
+
     const val BACKGROUND_PERMISSION = "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
 
     suspend fun readDay(client: HealthConnectClient, date: LocalDate, zone: ZoneId): DayData {

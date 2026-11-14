@@ -43,6 +43,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private val backgroundPermissionLauncher = registerForActivityResult(permissionContract) {
+        // 続けて、入れる前の古い記録も読める許可を頼む
+        try {
+            historyPermissionLauncher.launch(setOf(HealthReader.HISTORY_PERMISSION))
+        } catch (e: Exception) {
+            refreshStatus()
+        }
+    }
+
+    private val historyPermissionLauncher = registerForActivityResult(permissionContract) {
         refreshStatus()
     }
 

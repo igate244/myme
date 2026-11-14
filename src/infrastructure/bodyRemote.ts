@@ -28,8 +28,11 @@ export const loadCachedBodyDays = (): BodyDay[] => {
   }
 };
 
-/** 新しい日から days 日分を取る。取れたら控えも更新する */
-export const fetchBodyDays = async (uid: string, days = 30): Promise<BodyDay[]> => {
+/** 控えに残すのは新しい側の日数だけ（localStorage の容量を食いつぶさないため）。Firestore 側には全部残っている */
+const CACHE_DAYS = 120;
+
+/** 今日から days 日前までの分を取る。取れたら控えも更新する（Firestore の記録自体は消えずにずっと残る） */
+export const fetchBodyDays = async (uid: string, days = 90): Promise<BodyDay[]> => {
   await currentUserOf(uid); // ログインの確認（Firestore のルールもこのログインで判定される）
   const { db, mod } = await loadFirestore();
   // 並べ替え（新しい順）を Firestore に頼むと専用の索引が要るので、
@@ -43,7 +46,7 @@ export const fetchBodyDays = async (uid: string, days = 30): Promise<BodyDay[]> 
     .map((d: any) => normalizeBodyDayPlain(d.id, d.data()))
     .sort((a: BodyDay, b: BodyDay) => (a.date < b.date ? 1 : -1));
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(result));
+    localStorage.setItem(CACHE_KEY, JSON.stringify(result.slice(0, CACHE_DAYS)));
   } catch {
     /* 控えられなくても表示には困らない */
   }

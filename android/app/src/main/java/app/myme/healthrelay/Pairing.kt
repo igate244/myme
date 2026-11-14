@@ -48,6 +48,14 @@ data class Pairing(val uid: String, val refreshToken: String) {
                 .apply()
         }
 
+        /** 過去分をまとめて送る作業が済んでいるか */
+        fun backfilled(ctx: Context): Boolean =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("backfilled", false)
+
+        fun setBackfilled(ctx: Context) {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("backfilled", true).apply()
+        }
+
         fun lastSync(ctx: Context): String? =
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("lastSync", null)
     }

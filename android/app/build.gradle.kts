@@ -11,8 +11,8 @@ android {
         applicationId = "app.myme.healthrelay"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     // 自分のスマホに直接入れる（Playストアに出さない）ためのアプリ。
