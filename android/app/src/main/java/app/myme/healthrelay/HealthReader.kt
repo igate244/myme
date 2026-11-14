@@ -100,6 +100,25 @@ object HealthReader {
             ),
         )
 
+        // 心拍：集計で取れないときは、記録の中身（サンプル）から自分で出す
+        var hrMin = hrAgg[HeartRateRecord.BPM_MIN]
+        var hrAvg = hrAgg[HeartRateRecord.BPM_AVG]
+        var hrMax = hrAgg[HeartRateRecord.BPM_MAX]
+        if (hrAvg == null) {
+            val bpms = client.readRecords(
+                ReadRecordsRequest(
+                    recordType = HeartRateRecord::class,
+                    timeRangeFilter = range,
+                    dataOriginFilter = MI_ORIGINS,
+                ),
+            ).records.flatMap { r -> r.samples.map { it.beatsPerMinute } }
+            if (bpms.isNotEmpty()) {
+                hrMin = bpms.min()
+                hrMax = bpms.max()
+                hrAvg = Math.round(bpms.average())
+            }
+        }
+
         // 血中酸素
         val spo2 = client.readRecords(
             ReadRecordsRequest(
@@ -109,28 +128,29 @@ object HealthReader {
             ),
         ).records.map { it.percentage.value }
 
-        // 睡眠：その日に「起きた」ものを、その日の分にする
-        val sleepRange = TimeRangeFilter.between(start.minus(Duration.ofHours(18)), end)
-        val sessions = client.readRecords(
+        // 睡眠：その日に「起きた」ものを、その日の分にする。
+        // Mi Fitness は寝ている途中でも同じ睡眠を何度も書き込む（20:54-23:21、20:54-4:26、20:54-6:33 のように
+        // 開始が同じで終わりだけ伸びていく）。途中の版が前の日に紛れ込まないよう、
+        // 前後の日も含めて広めに読み、重なっているものは終わりが一番遅い版だけにしてから日を決める。
+        val sleepRange = TimeRangeFilter.between(start.minus(Duration.ofHours(18)), end.plus(Duration.ofHours(18)))
+        val allSessions = client.readRecords(
             ReadRecordsRequest(
                 recordType = SleepSessionRecord::class,
                 timeRangeFilter = sleepRange,
                 dataOriginFilter = MI_ORIGINS,
             ),
-        ).records
-            .filter { !it.endTime.isBefore(start) && it.endTime.isBefore(end) }
-            .sortedBy { it.startTime }
+        ).records.sortedWith(compareBy({ it.startTime }, { it.endTime }))
 
-        // 同じ睡眠が途中の同期と最終版で2件入ることがある。重なっていたら終わりが遅いほうだけ使う。
-        val kept = ArrayList<SleepSessionRecord>()
-        for (s in sessions) {
-            val last = kept.lastOrNull()
+        val finals = ArrayList<SleepSessionRecord>()
+        for (s in allSessions) {
+            val last = finals.lastOrNull()
             if (last != null && s.startTime.isBefore(last.endTime)) {
-                if (s.endTime.isAfter(last.endTime)) kept[kept.size - 1] = s
+                if (s.endTime.isAfter(last.endTime)) finals[finals.size - 1] = s
             } else {
-                kept.add(s)
+                finals.add(s)
             }
         }
+        val kept = finals.filter { !it.endTime.isBefore(start) && it.endTime.isBefore(end) }
         var deep = 0L
         var light = 0L
         var rem = 0L
@@ -189,9 +209,9 @@ object HealthReader {
         return DayData(
             date = date.toString(),
             steps = stepsAgg[StepsRecord.COUNT_TOTAL],
-            hrMin = hrAgg[HeartRateRecord.BPM_MIN],
-            hrAvg = hrAgg[HeartRateRecord.BPM_AVG],
-            hrMax = hrAgg[HeartRateRecord.BPM_MAX],
+            hrMin = hrMin,
+            hrAvg = hrAvg,
+            hrMax = hrMax,
             spo2Avg = if (spo2.isEmpty()) null else spo2.average(),
             spo2Min = spo2.minOrNull(),
             sleepMin = sleepMin,
