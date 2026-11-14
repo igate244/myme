@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "app.myme.healthrelay"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.myme.healthrelay"
