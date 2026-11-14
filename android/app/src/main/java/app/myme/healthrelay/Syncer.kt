@@ -3,6 +3,9 @@ package app.myme.healthrelay
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
@@ -29,9 +32,18 @@ object Syncer {
         // 古い記録を読む許可があって、まだ過去分を送っていなければ、1年分を一度だけまとめて送る
         val canBackfill = granted.contains(HealthReader.HISTORY_PERMISSION) && !Pairing.backfilled(ctx)
         val days = if (canBackfill) 365 else recentDays
-        val all = (0 until days).map { HealthReader.readDay(client, today.minusDays(it.toLong()), zone) }
-        val withData = all.filter { it.hasAny() }
-        withData.chunked(400).forEach { FirestoreClient.writeDays(session, it) }
+        // 30日ずつ、5日ぶんを同時に読んでは送る（1年分でも途中で止まりにくく、速い）
+        val withData = mutableListOf<DayData>()
+        for (chunk in (0 until days).chunked(30)) {
+            val read = coroutineScope {
+                chunk.chunked(5).flatMap { group ->
+                    group.map { async { HealthReader.readDay(client, today.minusDays(it.toLong()), zone) } }.awaitAll()
+                }
+            }
+            val found = read.filter { it.hasAny() }
+            FirestoreClient.writeDays(session, found)
+            withData.addAll(found)
+        }
         if (canBackfill) Pairing.setBackfilled(ctx)
 
         val stepDays = withData.count { (it.steps ?: 0L) > 0L }
