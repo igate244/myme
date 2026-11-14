@@ -259,8 +259,9 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
 /** 項目の値を出すときに使う、日ごとの付け足しデータ */
 type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary> };
 
-type MetricKey = "steps" | "sleep" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
-type Tab = "all" | MetricKey;
+type MetricKey = "steps" | "sleep" | "deepPct" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
+/** 上のタブ。睡眠に関わる項目（睡眠時間・深い睡眠・心拍・血中酸素・室温・湿度）は「睡眠」の1ページにまとめてある */
+type Tab = "all" | "steps" | "sleep" | "kcal" | "rating";
 
 type Metric = {
   key: MetricKey;
@@ -299,6 +300,16 @@ const METRICS: Metric[] = [
       return r ? `${t}　${r.tempAvg.toFixed(1)}℃ ${Math.round(r.humAvg)}%` : t;
     },
     scaleMax: 480,
+    floor: 0,
+  },
+  {
+    key: "deepPct",
+    label: "深い睡眠の割合",
+    unit: "%",
+    value: (d) => (d.deepMin !== null && d.sleepMin !== null && d.sleepMin > 0 ? (d.deepMin / d.sleepMin) * 100 : null),
+    text: (v) => String(Math.round(v)),
+    sub: (d) => (d.deepMin !== null ? `深い ${formatMinutes(d.deepMin)}` : ""),
+    scaleMax: 40,
     floor: 0,
   },
   {
@@ -366,7 +377,25 @@ const METRICS: Metric[] = [
   },
 ];
 
-const TABS: { key: Tab; label: string }[] = [{ key: "all", label: "すべて" }, ...METRICS.map((m) => ({ key: m.key as Tab, label: m.label }))];
+const TABS: { key: Tab; label: string }[] = [
+  { key: "all", label: "すべて" },
+  { key: "steps", label: "歩数" },
+  { key: "sleep", label: "睡眠" },
+  { key: "kcal", label: "カロリー" },
+  { key: "rating", label: "調子" },
+];
+
+const metricOf = (key: MetricKey): Metric => METRICS.find((m) => m.key === key) as Metric;
+
+/** 睡眠ページの中で切り替える項目と、ボタンの名前 */
+const SLEEP_ITEMS: { key: MetricKey; label: string }[] = [
+  { key: "sleep", label: "睡眠時間" },
+  { key: "deepPct", label: "深い睡眠" },
+  { key: "sleepHr", label: "心拍" },
+  { key: "roomTemp", label: "室温" },
+  { key: "roomHum", label: "湿度" },
+  { key: "spo2", label: "血中酸素" },
+];
 
 const TabBar: React.FC<{ tab: Tab; onChange: (t: Tab) => void }> = ({ tab, onChange }) => (
   <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
@@ -437,7 +466,8 @@ const RoomLink: React.FC<{ days: BodyDay[]; ctx: Ctx }> = ({ days, ctx }) => {
 };
 
 /** 1つの項目を詳しく見る：選んだ日・期間の推移・平均/最高/最低・日ごとの一覧 */
-const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (date: string) => void }> = ({
+const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (date: string) => void; hideTile?: boolean }> = ({
+  hideTile,
   metric,
   days,
   ctx,
@@ -464,11 +494,9 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
   );
   return (
     <>
-      <Tile label={`${formatDayLabel(day.date)}の${metric.label}`} value={todayV === null ? "—" : metric.text(todayV)} unit={metric.unit} sub={metric.sub(day, ctx) || undefined}>
-        {metric.key === "sleep" && <StageBar day={day} />}
-      </Tile>
-
-      {metric.key === "sleep" && <RoomLink days={days} ctx={ctx} />}
+      {!hideTile && (
+        <Tile label={`${formatDayLabel(day.date)}の${metric.label}`} value={todayV === null ? "—" : metric.text(todayV)} unit={metric.unit} sub={metric.sub(day, ctx) || undefined} />
+      )}
 
       <div style={{ ...cardStyle, marginBottom: 0 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
@@ -583,6 +611,51 @@ const NavButton: React.FC<{ label: string; disabled: boolean; onClick: () => voi
     {label}
   </button>
 );
+
+/** 睡眠に関わるものを1ページに集めた画面：その晩のまとめ → 室温と睡眠の関係 → 項目を選んで推移を見る */
+const SleepPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (date: string) => void }> = ({ days, ctx, day, onPick }) => {
+  const [item, setItem] = useState<MetricKey>("sleep");
+  const room = ctx.room[day.date];
+  const deepPct = metricOf("deepPct").value(day, ctx);
+  return (
+    <>
+      <Tile
+        wide
+        label={`${formatDayLabel(day.date)}の睡眠`}
+        value={sleepText(day)}
+        sub={day.sleepStartMs === null ? undefined : `${formatClock(day.sleepStartMs)} 〜 ${formatClock(day.sleepEndMs)}${deepPct === null ? "" : `　深い睡眠 ${Math.round(deepPct)}%`}`}
+      >
+        <StageBar day={day} />
+      </Tile>
+      <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
+        <Tile label="睡眠中の心拍" value={day.hrSleepAvg == null ? "—" : String(day.hrSleepAvg)} unit="回/分" sub={day.hrSleepMin != null ? `最低 ${day.hrSleepMin}` : undefined} />
+        <Tile label="血中酸素" value={day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg))} unit="%" sub={day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined} />
+        <Tile label="睡眠中の室温" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `${room.tempMin.toFixed(1)}〜${room.tempMax.toFixed(1)}` : undefined} />
+        <Tile label="睡眠中の湿度" value={room ? String(Math.round(room.humAvg)) : "—"} unit="%" sub={room ? undefined : "SwitchBot 未連携か、記録なし"} />
+      </div>
+
+      <RoomLink days={days} ctx={ctx} />
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
+        {SLEEP_ITEMS.map((it) => {
+          const on = it.key === item;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() => setItem(it.key)}
+              aria-pressed={on}
+              style={{ all: "unset", boxSizing: "border-box", flexShrink: 0, padding: "7px 13px", borderRadius: 999, fontSize: "0.8rem", cursor: "pointer", fontFamily: "inherit", color: on ? TEXT_MAIN : TEXT_MUTED, background: on ? SURFACE_2 : "transparent", border: `1px solid ${on ? LINE_2 : LINE}` }}
+            >
+              {it.label}
+            </button>
+          );
+        })}
+      </div>
+      <MetricDetail key={item} hideTile metric={metricOf(item)} days={days} ctx={ctx} day={day} onPick={onPick} />
+    </>
+  );
+};
 
 const BodySection: React.FC<Props> = ({ onBack }) => {
   const { user } = useAuth();
@@ -750,7 +823,11 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                 </>
               ) : (
                 <>
-                  <MetricDetail metric={METRICS.find((m) => m.key === tab) as Metric} days={days} ctx={ctx} day={day} onPick={pick} />
+                  {tab === "sleep" ? (
+                    <SleepPage days={days} ctx={ctx} day={day} onPick={pick} />
+                  ) : (
+                    <MetricDetail metric={metricOf(tab)} days={days} ctx={ctx} day={day} onPick={pick} />
+                  )}
                   {tab === "rating" && <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />}
                 </>
               )}
