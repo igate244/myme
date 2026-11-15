@@ -39,6 +39,9 @@ data class DayData(
     val workoutsJson: String?,
     val hrSleepAvg: Long? = null,
     val hrSleepMin: Long? = null,
+    val stagesJson: String? = null,
+    val hrSeries: String? = null,
+    val spo2Series: String? = null,
     val kcalTotal: Long? = null,
     val kcalActive: Long? = null,
 ) {
@@ -52,6 +55,9 @@ data class DayData(
         int("steps", steps)
         int("hrSleepAvg", hrSleepAvg)
         int("hrSleepMin", hrSleepMin)
+        if (stagesJson != null) f.put("stages", JSONObject().put("stringValue", stagesJson))
+        if (hrSeries != null) f.put("hrSeries", JSONObject().put("stringValue", hrSeries))
+        if (spo2Series != null) f.put("spo2Series", JSONObject().put("stringValue", spo2Series))
         int("kcalTotal", kcalTotal)
         int("kcalActive", kcalActive)
         int("hrMin", hrMin)
@@ -139,13 +145,14 @@ object HealthReader {
         }
 
         // 血中酸素
-        val spo2 = client.readRecords(
+        val spo2Records = client.readRecords(
             ReadRecordsRequest(
                 recordType = OxygenSaturationRecord::class,
                 timeRangeFilter = range,
                 dataOriginFilter = MI_ORIGINS,
             ),
-        ).records.map { it.percentage.value }
+        ).records
+        val spo2 = spo2Records.map { it.percentage.value }
 
         // 睡眠：その日に「起きた」ものを、その日の分にする。
         // Mi Fitness は寝ている途中でも同じ睡眠を何度も書き込む（20:54-23:21、20:54-4:26、20:54-6:33 のように
@@ -196,17 +203,40 @@ object HealthReader {
         // 眠っていた時間。段階の記録があればその合計、なければ寝ていた時間の全体
         val sleepMin = if (kept.isEmpty()) null else if (hasStages) deep + light + rem + plainSleep else wholeMin
 
-        // 睡眠中の心拍（寝た〜起きた）。Mi Fitness は心拍を主に睡眠中に書くので、1日全体ではなくこの時間帯で読む
+        // 睡眠の時間帯の中身：眠りの段階の区切り、心拍（10分ごとの平均）、血中酸素。MYME の「睡眠」の時間ごとの図に使う
         var hrSleepAvg: Long? = null
         var hrSleepMin: Long? = null
+        var stagesJson: String? = null
+        var hrSeries: String? = null
+        var spo2Series: String? = null
         if (kept.isNotEmpty()) {
             val from = kept.first().startTime
             val to = kept.last().endTime
-            val first = heartInWindow(client, from, to, MI_ORIGINS)
-            // Mi 由来で取れなければ、取り込み元の指定なしでもう一度（取り込み元の名前が違っていた場合の保険）
-            val result = if (first.first != null) first else heartInWindow(client, from, to, emptySet())
-            hrSleepAvg = result.first
-            hrSleepMin = result.second
+
+            val stages = JSONArray()
+            for (sess in kept) {
+                for (st in sess.stages.sortedBy { it.startTime }) {
+                    val g = when (st.stage) {
+                        SleepSessionRecord.STAGE_TYPE_AWAKE,
+                        SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
+                        SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> 0
+                        SleepSessionRecord.STAGE_TYPE_REM -> 1
+                        SleepSessionRecord.STAGE_TYPE_DEEP -> 3
+                        SleepSessionRecord.STAGE_TYPE_LIGHT, SleepSessionRecord.STAGE_TYPE_SLEEPING -> 2
+                        else -> -1
+                    }
+                    if (g >= 0) stages.put(JSONObject().put("g", g).put("s", st.startTime.toEpochMilli()).put("e", st.endTime.toEpochMilli()))
+                }
+            }
+            if (stages.length() > 0) stagesJson = stages.toString()
+
+            val hr = heartSleep(client, from, to, MI_ORIGINS).let { if (it.avg != null || it.series != null) it else heartSleep(client, from, to, emptySet()) }
+            hrSleepAvg = hr.avg
+            hrSleepMin = hr.min
+            hrSeries = hr.series
+
+            val spo2Points = spo2Records.filter { !it.time.isBefore(from) && it.time.isBefore(to) }.sortedBy { it.time }
+            if (spo2Points.isNotEmpty()) spo2Series = spo2Points.joinToString(";") { "${it.time.toEpochMilli()},${Math.round(it.percentage.value)}" }
         }
 
         // 運動
@@ -258,6 +288,9 @@ object HealthReader {
             date = date.toString(),
             hrSleepAvg = hrSleepAvg,
             hrSleepMin = hrSleepMin,
+            stagesJson = stagesJson,
+            hrSeries = hrSeries,
+            spo2Series = spo2Series,
             kcalTotal = kcalTotal,
             kcalActive = kcalActive,
             steps = stepsAgg[StepsRecord.COUNT_TOTAL],
@@ -277,19 +310,29 @@ object HealthReader {
         )
     }
 
-    /** 指定の時間帯の心拍（平均, 最低）。集計で取れなければ、記録の中身（サンプル）から自分で出す */
-    private suspend fun heartInWindow(client: HealthConnectClient, from: java.time.Instant, to: java.time.Instant, origins: Set<DataOrigin>): Pair<Long?, Long?> {
+    class SleepHeart(val avg: Long?, val min: Long?, val series: String?)
+
+    /** 指定の時間帯の心拍。平均・最低と、10分ごとの平均の並び（"ミリ秒,心拍;…"）。集計で取れなければ、記録の中身（サンプル）から自分で出す */
+    private suspend fun heartSleep(client: HealthConnectClient, from: java.time.Instant, to: java.time.Instant, origins: Set<DataOrigin>): SleepHeart {
         val range = TimeRangeFilter.between(from, to)
         val agg = client.aggregate(
             AggregateRequest(metrics = setOf(HeartRateRecord.BPM_AVG, HeartRateRecord.BPM_MIN), timeRangeFilter = range, dataOriginFilter = origins),
         )
-        val avg = agg[HeartRateRecord.BPM_AVG]
-        if (avg != null) return avg to agg[HeartRateRecord.BPM_MIN]
-        val bpms = client.readRecords(
+        val samples = client.readRecords(
             ReadRecordsRequest(recordType = HeartRateRecord::class, timeRangeFilter = range, dataOriginFilter = origins),
-        ).records.flatMap { r -> r.samples.filter { !it.time.isBefore(from) && it.time.isBefore(to) }.map { it.beatsPerMinute } }
-        if (bpms.isEmpty()) return null to null
-        return Math.round(bpms.average()) to bpms.min()
+        ).records.flatMap { r -> r.samples.filter { !it.time.isBefore(from) && it.time.isBefore(to) } }
+        val bucketMs = 10 * 60 * 1000L
+        val series = samples.groupBy { it.time.toEpochMilli() / bucketMs }.toSortedMap()
+            .map { (k, v) -> "${k * bucketMs},${Math.round(v.map { it.beatsPerMinute }.average())}" }
+            .joinToString(";")
+            .ifEmpty { null }
+        var avg = agg[HeartRateRecord.BPM_AVG]
+        var min = agg[HeartRateRecord.BPM_MIN]
+        if (avg == null && samples.isNotEmpty()) {
+            avg = Math.round(samples.map { it.beatsPerMinute }.average())
+            min = samples.minOf { it.beatsPerMinute }
+        }
+        return SleepHeart(avg, min, series)
     }
 
     /** 確認用：最近の歩数が、どのアプリ由来で入っているか */

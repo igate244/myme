@@ -97,3 +97,20 @@ test("SwitchBot の履歴CSV：列を見出しで探し、日ごとの文字列�
   assert.equal(parseRoomSamples(merged).length, 3);
   assert.deepEqual(parseSwitchBotCsv("a,b\n1,2"), []);
 });
+
+test("睡眠の時間ごとの記録：段階と心拍・血中酸素の並びを読む（壊れた要素は飛ばす）", async () => {
+  const { parseSleepStages, parseSeries, normalizeBodyDayPlain } = await import("../src/domain/body.ts");
+  const stages = parseSleepStages('[{"g":3,"s":2000,"e":3000},{"g":9,"s":1,"e":2},{"g":0,"s":1000,"e":2000},{"g":1,"s":5,"e":5}]');
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0].stage, 0);
+  assert.equal(stages[1].stage, 3);
+  assert.deepEqual(parseSleepStages("not json"), []);
+  assert.deepEqual(parseSleepStages(undefined), []);
+  const series = parseSeries("2000,60;1000,55;bad;3000,x");
+  assert.deepEqual(series, [{ ms: 1000, value: 55 }, { ms: 2000, value: 60 }]);
+  const day = normalizeBodyDayPlain("2026-11-15", { stages: '[{"g":2,"s":1,"e":2}]', hrSeries: "1,50", spo2Series: "1,96" });
+  assert.equal(day.sleepStages.length, 1);
+  assert.equal(day.hrSeries[0].value, 50);
+  assert.equal(day.spo2Series[0].value, 96);
+  assert.deepEqual(normalizeBodyDayPlain("x", {}).sleepStages, []);
+});

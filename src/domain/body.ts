@@ -4,6 +4,11 @@
 // 端末内の DB（IndexedDB）には入れない。Firestore が元データで、見るたびに読み直す。
 // 画面や通信の部品に依存しない純粋な関数だけを置く（テストしやすいように）。
 
+/** 眠りの段階の区切り。stage は 0=覚醒 1=レム 2=浅い 3=深い */
+export type SleepSegment = { stage: 0 | 1 | 2 | 3; startMs: number; endMs: number };
+/** 時刻つきの値（心拍・血中酸素など） */
+export type SeriesPoint = { ms: number; value: number };
+
 export type Workout = { type: number; startMs: number; endMs: number; distanceM: number | null };
 
 export type BodyDay = {
@@ -29,6 +34,11 @@ export type BodyDay = {
   awakeMin: number | null;
   sleepStartMs: number | null;
   sleepEndMs: number | null;
+  /** 睡眠の段階の区切り（中継アプリ1.5〜。無ければ空） */
+  sleepStages: SleepSegment[];
+  /** 睡眠中の心拍（10分ごとの平均）と血中酸素 */
+  hrSeries: SeriesPoint[];
+  spo2Series: SeriesPoint[];
   workouts: Workout[];
   updatedAt: number | null;
 };
@@ -84,6 +94,37 @@ const parseWorkouts = (raw: unknown): Workout[] => {
   }
 };
 
+/** 中継アプリが送る眠りの段階：JSON の [{g,s,e},…]（g=0〜3、s/e=ミリ秒）。壊れた要素は飛ばす */
+export const parseSleepStages = (raw: unknown): SleepSegment[] => {
+  if (typeof raw !== "string" || raw === "") return [];
+  try {
+    const arr: unknown = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const out: SleepSegment[] = [];
+    for (const x of arr as any[]) {
+      const g = num(x?.g);
+      const startMs = num(x?.s);
+      const endMs = num(x?.e);
+      if (g === null || startMs === null || endMs === null || ![0, 1, 2, 3].includes(g) || endMs <= startMs) continue;
+      out.push({ stage: g as 0 | 1 | 2 | 3, startMs, endMs });
+    }
+    return out.sort((a, b) => a.startMs - b.startMs);
+  } catch {
+    return [];
+  }
+};
+
+/** 「ミリ秒,値;ミリ秒,値;…」の並び（心拍・血中酸素）を読む。壊れた行は飛ばす */
+export const parseSeries = (raw: unknown): SeriesPoint[] => {
+  if (typeof raw !== "string" || raw === "") return [];
+  const out: SeriesPoint[] = [];
+  for (const part of raw.split(";")) {
+    const [m, v] = part.split(",").map(Number);
+    if (Number.isFinite(m) && Number.isFinite(v)) out.push({ ms: m, value: v });
+  }
+  return out.sort((a, b) => a.ms - b.ms);
+};
+
 /** 普通の値になったドキュメント（SDK の data()）を BodyDay にする。欠けている項目は null */
 export const normalizeBodyDayPlain = (id: string, f: Record<string, unknown> | undefined): BodyDay => {
   const d = f ?? {};
@@ -106,6 +147,9 @@ export const normalizeBodyDayPlain = (id: string, f: Record<string, unknown> | u
     awakeMin: num(d.awakeMin),
     sleepStartMs: num(d.sleepStartMs),
     sleepEndMs: num(d.sleepEndMs),
+    sleepStages: parseSleepStages(d.stages),
+    hrSeries: parseSeries(d.hrSeries),
+    spo2Series: parseSeries(d.spo2Series),
     workouts: parseWorkouts(d.workouts),
     updatedAt: num(d.updatedAt),
   };

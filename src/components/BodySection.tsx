@@ -5,7 +5,7 @@
 // その日の調子（5段階）は自分で付ける記録で、users/{uid}/bodyRatings に保存する（中継アプリの上書きに巻き込まれない）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
-import type { BodyDay, RoomSummary } from "../domain/body";
+import type { BodyDay, RoomSample, RoomSummary } from "../domain/body";
 import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
 import type { RatingMap, RoomDocs } from "../infrastructure/bodyRemote";
 import {
@@ -20,6 +20,7 @@ import {
   makePairingCode,
   saveRating,
 } from "../infrastructure/bodyRemote";
+import { STAGE_META, SleepTimeline } from "./body/SleepTimeline";
 import SectionHeader from "./SectionHeader";
 import {
   outerStyle,
@@ -58,7 +59,8 @@ const monthOf = (date: string): string => {
 };
 
 /** 面ひとつ（小さな見出し＋大きい数字＋補足） */
-const Tile: React.FC<{ label: string; value: string; unit?: string; sub?: string; children?: React.ReactNode; wide?: boolean }> = ({
+const Tile: React.FC<{ label: string; value: string; unit?: string; sub?: string; children?: React.ReactNode; wide?: boolean; onOpen?: () => void }> = ({
+  onOpen,
   label,
   value,
   unit,
@@ -66,8 +68,14 @@ const Tile: React.FC<{ label: string; value: string; unit?: string; sub?: string
   children,
   wide,
 }) => (
-  <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 16px", gridColumn: wide ? "1 / -1" : undefined, minWidth: 0 }}>
-    <div style={{ fontSize: "0.74rem", color: TEXT_MUTED }}>{label}</div>
+  <div
+    {...(onOpen ? { role: "button", tabIndex: 0, onClick: onOpen, onKeyDown: (e: React.KeyboardEvent) => (e.key === "Enter" || e.key === " ") && onOpen() } : {})}
+    style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 16px", gridColumn: wide ? "1 / -1" : undefined, minWidth: 0, cursor: onOpen ? "pointer" : undefined }}
+  >
+    <div style={{ fontSize: "0.74rem", color: TEXT_MUTED, display: "flex", justifyContent: "space-between", gap: 8 }}>
+      <span>{label}</span>
+      {onOpen && <span aria-hidden="true">›</span>}
+    </div>
     <div style={{ marginTop: 6, fontSize: "1.7rem", fontWeight: 600, lineHeight: 1.15, color: TEXT_MAIN, wordBreak: "break-word" }}>
       {value}
       {unit && value !== "—" && <span style={{ fontSize: "0.78rem", fontWeight: 400, color: TEXT_MUTED, marginLeft: 4 }}>{unit}</span>}
@@ -79,12 +87,11 @@ const Tile: React.FC<{ label: string; value: string; unit?: string; sub?: string
 
 /** 睡眠の内訳を、平らな帯で見せる */
 const StageBar: React.FC<{ day: BodyDay }> = ({ day }) => {
-  const parts = [
-    { name: "深い", min: day.deepMin, color: ACCENT_STRONG },
-    { name: "浅い", min: day.lightMin, color: ACCENT },
-    { name: "レム", min: day.remMin, color: OK_COLOR },
-    { name: "覚醒", min: day.awakeMin, color: LINE_2 },
-  ].filter((p) => p.min !== null && p.min > 0) as { name: string; min: number; color: string }[];
+  const mins: Record<number, number | null> = { 0: day.awakeMin, 1: day.remMin, 2: day.lightMin, 3: day.deepMin };
+  // 帯は「深い・浅い・レム・覚醒」の順（図の下から上）。色は一晩の流れの図と同じ
+  const parts = [3, 2, 1, 0]
+    .map((st) => ({ name: STAGE_META[st].name, min: mins[st], color: STAGE_META[st].color }))
+    .filter((p) => p.min !== null && p.min > 0) as { name: string; min: number; color: string }[];
   if (parts.length === 0) return null;
   const total = parts.reduce((a, p) => a + p.min, 0);
   return (
@@ -107,7 +114,7 @@ const StageBar: React.FC<{ day: BodyDay }> = ({ day }) => {
 };
 
 /** 選んだ日のまとめ */
-const DayView: React.FC<{ day: BodyDay; room?: RoomSummary }> = ({ day, room }) => {
+const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (tab: Tab) => void }> = ({ day, room, onOpen }) => {
   const spo2 = day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg));
   const spo2Sub = day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined;
   const kcalSub =
@@ -115,10 +122,11 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary }> = ({ day, room }) 
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
-        <Tile label="歩数" value={stepsText(day)} unit="歩" />
-        <Tile label="活動中の消費カロリー" value={day.kcalActive == null ? "—" : day.kcalActive.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
+        <Tile label="歩数" value={stepsText(day)} unit="歩" onOpen={() => onOpen("steps")} />
+        <Tile onOpen={() => onOpen("kcal")} label="活動中の消費カロリー" value={day.kcalActive == null ? "—" : day.kcalActive.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
         <Tile
           wide
+          onOpen={() => onOpen("sleep")}
           label="睡眠"
           value={sleepText(day)}
           sub={
@@ -132,8 +140,8 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary }> = ({ day, room }) 
         >
           <StageBar day={day} />
         </Tile>
-        <Tile label="睡眠中の部屋" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `湿度 ${Math.round(room.humAvg)}%` : "SwitchBot を中継アプリに入れると出ます"} />
-        <Tile label="血中酸素" value={spo2} unit="%" sub={spo2Sub} />
+        <Tile onOpen={() => onOpen("sleep")} label="睡眠中の部屋" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `湿度 ${Math.round(room.humAvg)}%` : "SwitchBot を中継アプリに入れると出ます"} />
+        <Tile onOpen={() => onOpen("sleep")} label="血中酸素" value={spo2} unit="%" sub={spo2Sub} />
       </div>
       {day.workouts.length > 0 && (
         <div style={{ ...cardStyle, marginBottom: 0, marginTop: 10, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -257,7 +265,7 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
 /* ------------------------------------------------------------ 項目ごとの詳しい画面 */
 
 /** 項目の値を出すときに使う、日ごとの付け足しデータ */
-type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary> };
+type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary>; samples: RoomSample[] };
 
 type MetricKey = "steps" | "sleep" | "deepPct" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 /** 上のタブ。睡眠に関わる項目（睡眠時間・深い睡眠・心拍・血中酸素・室温・湿度）は「睡眠」の1ページにまとめてある */
@@ -627,6 +635,7 @@ const SleepPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (da
       >
         <StageBar day={day} />
       </Tile>
+      <SleepTimeline day={day} samples={ctx.samples} />
       <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
         <Tile label="睡眠中の心拍" value={day.hrSleepAvg == null ? "—" : String(day.hrSleepAvg)} unit="回/分" sub={day.hrSleepMin != null ? `最低 ${day.hrSleepMin}` : undefined} />
         <Tile label="血中酸素" value={day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg))} unit="%" sub={day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined} />
@@ -703,8 +712,8 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
   }, [load]);
 
   // 睡眠の時間帯（寝た〜起きた）の部屋の平均。部屋の記録が無い晩は入らない
+  const samples = useMemo(() => Object.values(roomDocs).flatMap((raw) => parseRoomSamples(raw)).sort((a, b) => a.ms - b.ms), [roomDocs]);
   const room = useMemo(() => {
-    const samples = Object.values(roomDocs).flatMap((raw) => parseRoomSamples(raw));
     const out: Record<string, RoomSummary> = {};
     for (const d of days) {
       if (d.sleepStartMs === null || d.sleepEndMs === null) continue;
@@ -712,8 +721,8 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
       if (r) out[d.date] = r;
     }
     return out;
-  }, [roomDocs, days]);
-  const ctx: Ctx = useMemo(() => ({ ratings, room }), [ratings, room]);
+  }, [samples, days]);
+  const ctx: Ctx = useMemo(() => ({ ratings, room, samples }), [ratings, room, samples]);
 
   const index = Math.max(0, days.findIndex((d) => d.date === selected)); // 未選択・見つからないときは最新日
   const day: BodyDay | undefined = days[index];
@@ -728,6 +737,11 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
       setRatings(cacheRating(before, date, before[date] ?? null));
       setError("調子を保存できませんでした。電波の良いところでもう一度。");
     });
+  };
+
+  const openTab = (t: Tab): void => {
+    setTab(t);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const pick = (date: string): void => {
@@ -801,7 +815,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
 
               {tab === "all" ? (
                 <>
-                  <DayView day={day} room={room[day.date]} />
+                  <DayView day={day} room={room[day.date]} onOpen={openTab} />
                   <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
                   <WeekBars days={days} ratings={ratings} selected={day.date} onPick={pick} />
 
