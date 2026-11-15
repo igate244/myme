@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { BodyDay, RoomSample, RoomSummary } from "../domain/body";
-import { RATING_LABELS, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
+import { RATING_LABELS, normalizeBodyDayPlain, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
 import type { RatingMap, RoomDocs } from "../infrastructure/bodyRemote";
 import {
   cacheRating,
@@ -262,10 +262,32 @@ const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null)
   </div>
 );
 
-/** 直近7日の棒グラフ（縦軸＋数字。左が古い日。押すとその日を開く） */
-const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string; onPick: (date: string) => void }> = ({ days, ratings, selected, onPick }) => {
-  const week = days.slice(0, 7).reverse();
-  if (week.length < 2) return null;
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+const toDateStr = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/** 「2026-11-16」に n 日足す（引くときは負の数） */
+const addDays = (date: string, n: number): string => {
+  const [y, m, d] = date.split("-").map(Number);
+  return toDateStr(new Date(y, m - 1, d + n));
+};
+
+/** 7日分の棒グラフ（縦軸＋数字。左が古い日。押すとその日を開く）。‹ › で1週間ずつ前後する。初期は今日までの7日 */
+const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string; loading: boolean; onPick: (date: string) => void; onNeedFrom: (date: string) => void }> = ({ days, ratings, selected, loading, onPick, onNeedFrom }) => {
+  const today = toDateStr(new Date());
+  const [end, setEnd] = useState<string>(today);
+  const byDate = useMemo(() => new Map(days.map((d) => [d.date, d])), [days]);
+  const dates = Array.from({ length: 7 }, (_, i) => addDays(end, i - 6));
+  // 記録が無い日も空の棒として並べる（日付がずれないように）
+  const week: BodyDay[] = dates.map((date) => byDate.get(date) ?? normalizeBodyDayPlain(date, undefined));
+  const oldest = days.length > 0 ? days[days.length - 1].date : today;
+  const move = (delta: number): void => {
+    const next = addDays(end, delta * 7);
+    if (next > today) return;
+    setEnd(next);
+    const start = addDays(next, -6);
+    if (start < oldest) onNeedFrom(start);
+  };
+  const atLatest = end >= today;
+  const label = (date: string): string => `${Number(date.split("-")[1])}/${Number(date.split("-")[2])}`;
   const stepsTop = niceTop(Math.max(STEPS_TARGET * 1.5, ...week.map((d) => d.steps ?? 0)));
   const sleepTop = Math.max(540, Math.ceil(Math.max(0, ...week.map((d) => d.sleepMin ?? 0)) / 60) * 60);
   const chart = (title: string, value: (d: BodyDay) => number | null, top: number, ticks: number[], tickText: (v: number) => string, text: (v: number) => string, target?: number) => (
@@ -287,7 +309,15 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
   );
   return (
     <div style={{ ...cardStyle, marginBottom: 0 }}>
-      <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この7日</div>
+      <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) 44px", alignItems: "center" }}>
+        <NavButton label="‹" disabled={false} onClick={() => move(-1)} aria="前の週" />
+        <div style={{ textAlign: "center", fontSize: "1rem", fontWeight: 600, color: TEXT_MAIN }}>
+          {label(dates[0])} 〜 {label(dates[6])}
+          {atLatest && <span style={{ fontSize: "0.72rem", fontWeight: 400, color: TEXT_MUTED }}>　直近</span>}
+        </div>
+        <NavButton label="›" disabled={atLatest} onClick={() => move(1)} aria="次の週" />
+      </div>
+      {loading && <div style={{ textAlign: "center", fontSize: "0.72rem", color: TEXT_MUTED }}>読み込み中…</div>}
       {chart("歩数", (d) => d.steps, stepsTop, [0, STEPS_TARGET, stepsTop], (v) => v.toLocaleString("ja-JP"), (v) => v.toLocaleString("ja-JP"), STEPS_TARGET)}
       {chart("睡眠", (d) => d.sleepMin, sleepTop, [0, SLEEP_TARGET, sleepTop], formatMinutes, formatMinutes, SLEEP_TARGET)}
       {chart("調子", (d) => ratings[d.date] ?? null, 3, [1, 2, 3], (v) => RATING_LABELS[v] ?? "", () => "")}
@@ -670,12 +700,12 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
   );
 };
 
-const NavButton: React.FC<{ label: string; disabled: boolean; onClick: () => void }> = ({ label, disabled, onClick }) => (
+const NavButton: React.FC<{ label: string; disabled: boolean; onClick: () => void; aria?: string }> = ({ label, disabled, onClick, aria }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
-    aria-label={label === "‹" ? "前の日" : "次の日"}
+    aria-label={aria ?? (label === "‹" ? "前の日" : "次の日")}
     style={{ all: "unset", boxSizing: "border-box", width: 44, height: 44, textAlign: "center", lineHeight: "44px", fontSize: "1.6rem", cursor: disabled ? "default" : "pointer", color: disabled ? LINE_2 : TEXT_SUB, fontFamily: "inherit" }}
   >
     {label}
@@ -925,7 +955,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
               {period === "month" ? (
                 <MonthCalendar days={days} ratings={ratings} selected={day.date} loading={loading} onOpenDay={openDay} onNeedFrom={needFrom} />
               ) : period === "week" ? (
-                <WeekBars days={days} ratings={ratings} selected={day.date} onPick={openDay} />
+                <WeekBars days={days} ratings={ratings} selected={day.date} loading={loading} onPick={openDay} onNeedFrom={needFrom} />
               ) : (
                 <>
                   <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) 44px", alignItems: "center" }}>
