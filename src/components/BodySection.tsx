@@ -174,17 +174,35 @@ const StageBar: React.FC<{ day: BodyDay }> = ({ day }) => {
   );
 };
 
-/** 選んだ日のまとめ */
-const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (tab: Tab) => void }> = ({ day, room, onOpen }) => {
+/** グループの小見出し（睡眠・活動） */
+const GroupLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{ fontSize: "0.75rem", color: TEXT_MUTED, fontWeight: 600, margin: "8px 4px 0" }}>{children}</div>
+);
+
+/** その日の運動の一覧（無ければ何も出さない） */
+const Workouts: React.FC<{ day: BodyDay }> = ({ day }) =>
+  day.workouts.length === 0 ? null : (
+    <div style={{ ...cardStyle, marginBottom: 0, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: "0.74rem", color: TEXT_MUTED }}>運動</div>
+      {day.workouts.map((w) => (
+        <div key={`${w.startMs}-${w.type}`} style={{ fontSize: "0.86rem", color: TEXT_SUB }}>
+          {workoutName(w.type)}　{formatClock(w.startMs)}〜{formatClock(w.endMs)}
+          {w.distanceM !== null && w.distanceM > 0 ? `　${(w.distanceM / 1000).toFixed(1)}km` : ""}
+        </div>
+      ))}
+    </div>
+  );
+
+/** 選んだ日のまとめ：睡眠のかたまり → 活動のかたまり（調子は呼び出し側が先頭に置く） */
+const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (item: Item) => void }> = ({ day, room, onOpen }) => {
   const spo2 = day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg));
   const spo2Sub = day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined;
   const kcalSub =
     day.kcalActive == null ? "中継アプリ1.3で許可すると入ります" : day.kcalTotal != null ? `総消費 ${day.kcalTotal.toLocaleString("ja-JP")} kcal` : undefined;
   return (
     <>
+      <GroupLabel>睡眠</GroupLabel>
       <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
-        <Tile label="歩数" value={stepsText(day)} unit="歩" onOpen={() => onOpen("steps")} />
-        <Tile onOpen={() => onOpen("kcal")} label="活動中の消費カロリー" value={day.kcalActive == null ? "—" : day.kcalActive.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
         <Tile
           wide
           onOpen={() => onOpen("sleep")}
@@ -197,17 +215,13 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (tab: Tab) =
         <Tile onOpen={() => onOpen("sleep")} label="睡眠中の部屋" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `湿度 ${Math.round(room.humAvg)}%` : "SwitchBot を中継アプリに入れると出ます"} />
         <Tile onOpen={() => onOpen("sleep")} label="血中酸素" value={spo2} unit="%" sub={spo2Sub} />
       </div>
-      {day.workouts.length > 0 && (
-        <div style={{ ...cardStyle, marginBottom: 0, marginTop: 10, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: "0.74rem", color: TEXT_MUTED }}>運動</div>
-          {day.workouts.map((w) => (
-            <div key={`${w.startMs}-${w.type}`} style={{ fontSize: "0.86rem", color: TEXT_SUB }}>
-              {workoutName(w.type)}　{formatClock(w.startMs)}〜{formatClock(w.endMs)}
-              {w.distanceM !== null && w.distanceM > 0 ? `　${(w.distanceM / 1000).toFixed(1)}km` : ""}
-            </div>
-          ))}
-        </div>
-      )}
+
+      <GroupLabel>活動</GroupLabel>
+      <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
+        <Tile label="歩数" value={stepsText(day)} unit="歩" onOpen={() => onOpen("activity")} />
+        <Tile onOpen={() => onOpen("activity")} label="活動中の消費カロリー" value={day.kcalActive == null ? "—" : day.kcalActive.toLocaleString("ja-JP")} unit="kcal" sub={kcalSub} />
+      </div>
+      <Workouts day={day} />
     </>
   );
 };
@@ -309,7 +323,9 @@ type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary>; samples: Roo
 
 type MetricKey = "steps" | "sleep" | "deepPct" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 /** 上のタブ。睡眠に関わる項目（睡眠時間・深い睡眠・心拍・血中酸素・室温・湿度）は「睡眠」の1ページにまとめてある */
-type Tab = "all" | "month" | "steps" | "sleep" | "kcal" | "rating";
+type Period = "day" | "week" | "month";
+/** 「日」の中で見る項目。睡眠（睡眠・部屋・血中酸素…）と活動（歩数・カロリー・運動）はそれぞれ1ページにまとめてある */
+type Item = "all" | "sleep" | "activity" | "rating";
 
 type Metric = {
   key: MetricKey;
@@ -441,13 +457,24 @@ const METRICS: Metric[] = [
   },
 ];
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "all", label: "すべて" },
+/** 1段目：見る時間の幅 */
+const VIEW_PERIODS: { key: Period; label: string }[] = [
+  { key: "day", label: "日" },
+  { key: "week", label: "週" },
   { key: "month", label: "月" },
-  { key: "steps", label: "歩数" },
+];
+/** 2段目（「日」のときだけ）：見る項目 */
+const ITEM_TABS: { key: Item; label: string }[] = [
+  { key: "all", label: "すべて" },
   { key: "sleep", label: "睡眠" },
-  { key: "kcal", label: "カロリー" },
+  { key: "activity", label: "活動" },
   { key: "rating", label: "調子" },
+];
+
+/** 活動ページの中で切り替える項目 */
+const ACTIVITY_ITEMS: { key: MetricKey; label: string }[] = [
+  { key: "steps", label: "歩数" },
+  { key: "kcal", label: "カロリー" },
 ];
 
 const metricOf = (key: MetricKey): Metric => METRICS.find((m) => m.key === key) as Metric;
@@ -462,24 +489,31 @@ const SLEEP_ITEMS: { key: MetricKey; label: string }[] = [
   { key: "spo2", label: "血中酸素" },
 ];
 
-const TabBar: React.FC<{ tab: Tab; onChange: (t: Tab) => void }> = ({ tab, onChange }) => (
-  <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
-    {TABS.map((t) => {
-      const on = t.key === tab;
-      return (
-        <button
-          key={t.key}
-          type="button"
-          onClick={() => onChange(t.key)}
-          aria-pressed={on}
-          style={{ all: "unset", boxSizing: "border-box", flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: "0.85rem", cursor: "pointer", fontFamily: "inherit", color: on ? "#111214" : TEXT_SUB, background: on ? ACCENT_BODY : SURFACE_2, border: `1px solid ${on ? ACCENT_BODY : LINE_2}` }}
-        >
-          {t.label}
-        </button>
-      );
-    })}
-  </div>
-);
+/** 切り替えのボタン列。equal=true は横幅いっぱいを等分（1段目）、false は小さめの丸ボタン（2段目） */
+function TabBar<K extends string>({ tabs, value, onChange, equal }: { tabs: { key: K; label: string }[]; value: K; onChange: (k: K) => void; equal?: boolean }): React.ReactElement {
+  return (
+    <div style={equal ? { display: "grid", gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`, gap: 6, padding: 4, borderRadius: 10, background: SURFACE_2, border: `1px solid ${LINE}` } : { display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
+      {tabs.map((t) => {
+        const on = t.key === value;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            aria-pressed={on}
+            style={
+              equal
+                ? { all: "unset", boxSizing: "border-box", textAlign: "center", padding: "9px 0", borderRadius: 7, fontSize: "0.9rem", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: on ? "#111214" : TEXT_SUB, background: on ? ACCENT_BODY : "transparent" }
+                : { all: "unset", boxSizing: "border-box", flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: "0.85rem", cursor: "pointer", fontFamily: "inherit", color: on ? "#111214" : TEXT_SUB, background: on ? ACCENT_BODY : SURFACE_2, border: `1px solid ${on ? ACCENT_BODY : LINE_2}` }
+            }
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const PERIODS: { n: number; label: string }[] = [
   { n: 7, label: "7日" },
@@ -704,13 +738,41 @@ const SleepPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (da
   );
 };
 
+/** 活動に関わるものを1ページに集めた画面：歩数・カロリーを切り替えて推移を見る → その日の運動 */
+const ActivityPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (date: string) => void }> = ({ days, ctx, day, onPick }) => {
+  const [item, setItem] = useState<MetricKey>("steps");
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 0 4px", scrollbarWidth: "none" }}>
+        {ACTIVITY_ITEMS.map((it) => {
+          const on = it.key === item;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() => setItem(it.key)}
+              aria-pressed={on}
+              style={{ all: "unset", boxSizing: "border-box", flexShrink: 0, padding: "7px 13px", borderRadius: 999, fontSize: "0.8rem", cursor: "pointer", fontFamily: "inherit", color: on ? TEXT_MAIN : TEXT_MUTED, background: on ? SURFACE_2 : "transparent", border: `1px solid ${on ? LINE_2 : LINE}` }}
+            >
+              {it.label}
+            </button>
+          );
+        })}
+      </div>
+      <MetricDetail key={item} metric={metricOf(item)} days={days} ctx={ctx} day={day} onPick={onPick} />
+      <Workouts day={day} />
+    </>
+  );
+};
+
 const BodySection: React.FC<Props> = ({ onBack }) => {
   const { user } = useAuth();
   const [days, setDays] = useState<BodyDay[]>(() => loadCachedBodyDays());
   const [ratings, setRatings] = useState<RatingMap>(() => loadCachedRatings());
   const [roomDocs, setRoomDocs] = useState<RoomDocs>(() => loadCachedRoomDocs());
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("all");
+  const [period, setPeriod] = useState<Period>("day");
+  const [item, setItem] = useState<Item>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState(90);
@@ -777,8 +839,16 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
     });
   };
 
-  const openTab = (t: Tab): void => {
-    setTab(t);
+  const openItem = (i: Item): void => {
+    setItem(i);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /** 週・月から、その日の「日」画面（すべて）へ */
+  const openDay = (date: string): void => {
+    setSelected(date);
+    setPeriod("day");
+    setItem("all");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -850,41 +920,37 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
             </p>
           ) : (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) 44px", alignItems: "center" }}>
-                <NavButton label="‹" disabled={index >= days.length - 1} onClick={() => setSelected(days[index + 1].date)} />
-                <div style={{ textAlign: "center", fontSize: "1.25rem", fontWeight: 600 }}>{formatDayLabel(day.date)}</div>
-                <NavButton label="›" disabled={index <= 0} onClick={() => setSelected(days[index - 1].date)} />
-              </div>
+              <TabBar equal tabs={VIEW_PERIODS} value={period} onChange={setPeriod} />
 
-              <TabBar tab={tab} onChange={setTab} />
-
-              {tab === "all" ? (
-                <>
-                  <DayView day={day} room={room[day.date]} onOpen={openTab} />
-                  <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
-                  <WeekBars days={days} ratings={ratings} selected={day.date} onPick={pick} />
-
-                </>
+              {period === "month" ? (
+                <MonthCalendar days={days} ratings={ratings} selected={day.date} loading={loading} onOpenDay={openDay} onNeedFrom={needFrom} />
+              ) : period === "week" ? (
+                <WeekBars days={days} ratings={ratings} selected={day.date} onPick={openDay} />
               ) : (
                 <>
-                  {tab === "month" ? (
-                    <MonthCalendar
-                      days={days}
-                      ratings={ratings}
-                      selected={day.date}
-                      loading={loading}
-                      onOpenDay={(date) => {
-                        setSelected(date);
-                        openTab("all");
-                      }}
-                      onNeedFrom={needFrom}
-                    />
-                  ) : tab === "sleep" ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) 44px", alignItems: "center" }}>
+                    <NavButton label="‹" disabled={index >= days.length - 1} onClick={() => setSelected(days[index + 1].date)} />
+                    <div style={{ textAlign: "center", fontSize: "1.25rem", fontWeight: 600 }}>{formatDayLabel(day.date)}</div>
+                    <NavButton label="›" disabled={index <= 0} onClick={() => setSelected(days[index - 1].date)} />
+                  </div>
+
+                  <TabBar tabs={ITEM_TABS} value={item} onChange={setItem} />
+
+                  {item === "all" ? (
+                    <>
+                      <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
+                      <DayView day={day} room={room[day.date]} onOpen={openItem} />
+                    </>
+                  ) : item === "sleep" ? (
                     <SleepPage days={days} ctx={ctx} day={day} onPick={pick} />
+                  ) : item === "activity" ? (
+                    <ActivityPage days={days} ctx={ctx} day={day} onPick={pick} />
                   ) : (
-                    <MetricDetail metric={metricOf(tab)} days={days} ctx={ctx} day={day} onPick={pick} />
+                    <>
+                      <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
+                      <MetricDetail metric={metricOf("rating")} days={days} ctx={ctx} day={day} onPick={pick} />
+                    </>
                   )}
-                  {tab === "rating" && <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />}
                 </>
               )}
 
