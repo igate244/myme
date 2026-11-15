@@ -2,7 +2,7 @@
 //
 // データは Firestore（users/{uid}/health）にあり、中継アプリ（android/）が毎日送ってくる。
 // ここでは読んで見せるだけ。端末内の DB には入れない。
-// その日の調子（5段階）は自分で付ける記録で、users/{uid}/bodyRatings に保存する（中継アプリの上書きに巻き込まれない）。
+// その日の調子（3段階）は自分で付ける記録で、users/{uid}/bodyRatings に保存する（中継アプリの上書きに巻き込まれない）。
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { BodyDay, RoomSample, RoomSummary } from "../domain/body";
@@ -53,9 +53,65 @@ const TWO_COLS = "minmax(0, 1fr) minmax(0, 1fr)";
 const stepsText = (d: BodyDay): string => (d.steps === null ? "—" : d.steps.toLocaleString("ja-JP"));
 const sleepText = (d: BodyDay): string => (d.sleepMin === null ? "—" : formatMinutes(d.sleepMin));
 
-const monthOf = (date: string): string => {
-  const [y, m] = date.split("-");
-  return `${y}年${Number(m)}月`;
+/** 縦軸の上端をきりのいい数にする（12,241 → 15,000） */
+const niceTop = (v: number): number => {
+  if (v <= 0) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  const n = v / mag;
+  const f = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((x) => n <= x + 1e-9) ?? 10;
+  return f * mag;
+};
+
+const AXIS_W = "2.8rem";
+
+type Bar = { key: string; v: number | null; label?: string; on: boolean; aria: string; onClick: () => void };
+
+/** 縦軸（目盛りの数字と薄い横線）つきの棒グラフ。floor〜top の間で棒の高さを決める */
+const BarChart: React.FC<{ bars: Bar[]; floor: number; top: number; ticks: number[]; tickText: (v: number) => string; plotH?: number; gap?: number; children?: React.ReactNode }> = ({
+  bars,
+  floor,
+  top,
+  ticks,
+  tickText,
+  plotH = 100,
+  gap = 3,
+  children,
+}) => {
+  const frac = (v: number): number => Math.min(1, Math.max(0, (v - floor) / (top - floor || 1)));
+  const boxH = plotH + 18; // 数字を棒の上に出すための余白
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: `${AXIS_W} minmax(0, 1fr)`, gap: 6 }}>
+      <div style={{ position: "relative", height: boxH }}>
+        {ticks.map((t) => (
+          <span key={t} style={{ position: "absolute", right: 0, bottom: frac(t) * plotH - 7, fontSize: "0.62rem", lineHeight: "14px", color: TEXT_MUTED, whiteSpace: "nowrap" }}>
+            {tickText(t)}
+          </span>
+        ))}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ position: "relative", height: boxH }}>
+          {ticks.map((t) => (
+            <div key={t} style={{ position: "absolute", left: 0, right: 0, bottom: frac(t) * plotH, height: 1, background: LINE }} />
+          ))}
+          <div style={{ position: "absolute", inset: 0, display: "grid", gridTemplateColumns: `repeat(${Math.max(1, bars.length)}, minmax(0, 1fr))`, gap, alignItems: "end" }}>
+            {bars.map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                onClick={b.onClick}
+                aria-label={b.aria}
+                style={{ all: "unset", boxSizing: "border-box", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", minWidth: 0 }}
+              >
+                {b.label && <span style={{ fontSize: "0.6rem", textAlign: "center", color: b.on ? TEXT_MAIN : TEXT_SUB, marginBottom: 3, whiteSpace: "nowrap" }}>{b.label}</span>}
+                <span style={{ display: "block", height: b.v === null ? 2 : Math.max(2, Math.round(frac(b.v) * plotH)), background: b.v === null ? LINE : ACCENT_BODY, opacity: b.on || b.v === null ? 1 : 0.55, borderRadius: 1 }} />
+              </button>
+            ))}
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
 };
 
 /** 面ひとつ（小さな見出し＋大きい数字＋補足） */
@@ -129,14 +185,7 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (tab: Tab) =
           onOpen={() => onOpen("sleep")}
           label="睡眠"
           value={sleepText(day)}
-          sub={
-            [
-              day.sleepStartMs === null ? "" : `${formatClock(day.sleepStartMs)} 〜 ${formatClock(day.sleepEndMs)}`,
-              day.hrSleepAvg == null ? "" : `睡眠中の心拍 平均${day.hrSleepAvg}${day.hrSleepMin != null ? `・最低${day.hrSleepMin}` : ""}`,
-            ]
-              .filter(Boolean)
-              .join("　") || undefined
-          }
+          sub={day.sleepStartMs === null ? undefined : `${formatClock(day.sleepStartMs)} 〜 ${formatClock(day.sleepEndMs)}`}
         >
           <StageBar day={day} />
         </Tile>
@@ -158,15 +207,12 @@ const DayView: React.FC<{ day: BodyDay; room?: RoomSummary; onOpen: (tab: Tab) =
   );
 };
 
-/** その日の調子（1〜5）。もう一度押すと消える */
+/** その日の調子（3段階）。もう一度押すと消える */
 const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null) => void }> = ({ rating, onChange }) => (
   <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 16px" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-      <span style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この日の調子</span>
-      <span style={{ fontSize: "0.8rem", color: rating === null ? TEXT_MUTED : ACCENT_BODY }}>{rating === null ? "まだ付けてない" : RATING_LABELS[rating]}</span>
-    </div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
-      {[1, 2, 3, 4, 5].map((n) => {
+    <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この日の調子</div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
+      {[1, 2, 3].map((n) => {
         const on = rating === n;
         return (
           <button
@@ -180,7 +226,7 @@ const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null)
               textAlign: "center",
               padding: "12px 0",
               borderRadius: 8,
-              fontSize: "1.05rem",
+              fontSize: "0.92rem",
               fontWeight: 600,
               cursor: "pointer",
               fontFamily: "inherit",
@@ -189,74 +235,62 @@ const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null)
               border: `1px solid ${on ? ACCENT_BODY : LINE_2}`,
             }}
           >
-            {n}
+            {RATING_LABELS[n]}
           </button>
         );
       })}
     </div>
-    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: "0.68rem", color: TEXT_MUTED }}>
-      <span>だめ</span>
-      <span>最高</span>
-    </div>
   </div>
 );
 
-/** 睡眠を棒の上に出す短い形（7時間54分 → 7h54） */
-const shortSleep = (min: number): string => `${Math.floor(min / 60)}h${String(Math.round(min % 60)).padStart(2, "0")}`;
-
-/** 直近7日の棒グラフ（平らな棒＋数字。左が古い日。押すとその日を開く） */
+/** 直近7日の棒グラフ（縦軸＋数字。左が古い日。押すとその日を開く） */
 const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string; onPick: (date: string) => void }> = ({ days, ratings, selected, onPick }) => {
   const week = days.slice(0, 7).reverse();
   if (week.length < 2) return null;
-  const maxSteps = Math.max(1, ...week.map((d) => d.steps ?? 0));
-  const maxSleep = Math.max(480, ...week.map((d) => d.sleepMin ?? 0));
-  const cols = `repeat(${week.length}, minmax(0, 1fr))`;
-  const row = (title: string, value: (d: BodyDay) => number | null, max: number, text: (v: number) => string) => (
-    <div style={{ marginTop: 14 }}>
+  const stepsTop = niceTop(Math.max(1, ...week.map((d) => d.steps ?? 0)));
+  const sleepTop = Math.max(480, Math.ceil(Math.max(0, ...week.map((d) => d.sleepMin ?? 0)) / 120) * 120);
+  const chart = (title: string, value: (d: BodyDay) => number | null, top: number, ticks: number[], tickText: (v: number) => string, text: (v: number) => string) => (
+    <div style={{ marginTop: 16 }}>
       <div style={{ fontSize: "0.72rem", color: TEXT_MUTED, marginBottom: 6 }}>{title}</div>
-      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4, alignItems: "end", height: 78 }}>
-        {week.map((d) => {
+      <BarChart
+        plotH={64}
+        floor={0}
+        top={top}
+        ticks={ticks}
+        tickText={tickText}
+        bars={week.map((d) => {
           const v = value(d);
-          const on = d.date === selected;
-          return (
-            <button
-              key={d.date}
-              type="button"
-              onClick={() => onPick(d.date)}
-              aria-label={`${formatDayLabel(d.date)}を開く`}
-              style={{ all: "unset", boxSizing: "border-box", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "stretch", cursor: "pointer", minWidth: 0 }}
-            >
-              <span style={{ fontSize: "0.6rem", textAlign: "center", color: on ? TEXT_MAIN : TEXT_SUB, marginBottom: 3, whiteSpace: "nowrap" }}>{v === null ? "" : text(v)}</span>
-              <span style={{ display: "block", height: v === null ? 2 : Math.max(2, Math.round((v / max) * 50)), background: v === null ? LINE : ACCENT_BODY, opacity: on || v === null ? 1 : 0.55, borderRadius: 2 }} />
-            </button>
-          );
+          return { key: d.date, v, label: v === null ? undefined : text(v) || undefined, on: d.date === selected, aria: `${formatDayLabel(d.date)}を開く`, onClick: () => onPick(d.date) };
         })}
-      </div>
+      />
     </div>
   );
   return (
     <div style={{ ...cardStyle, marginBottom: 0 }}>
       <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この7日</div>
-      {row("歩数", (d) => d.steps, maxSteps, (v) => v.toLocaleString("ja-JP"))}
-      {row("睡眠", (d) => d.sleepMin, maxSleep, shortSleep)}
-      {row("調子", (d) => ratings[d.date] ?? null, 5, (v) => String(v))}
-      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4, marginTop: 8 }}>
-        {week.map((d) => {
-          const [y, m, dd] = d.date.split("-").map(Number);
-          const on = d.date === selected;
-          return (
-            <button
-              key={d.date}
-              type="button"
-              onClick={() => onPick(d.date)}
-              style={{ all: "unset", boxSizing: "border-box", textAlign: "center", padding: "6px 0", fontSize: "0.68rem", lineHeight: 1.4, cursor: "pointer", color: on ? ACCENT_BODY : TEXT_MUTED, fontWeight: on ? 700 : 400, fontFamily: "inherit" }}
-            >
-              {m}/{dd}
-              <br />
-              {WEEK[new Date(y, m - 1, dd).getDay()]}
-            </button>
-          );
-        })}
+      {chart("歩数", (d) => d.steps, stepsTop, [0, stepsTop], (v) => v.toLocaleString("ja-JP"), (v) => v.toLocaleString("ja-JP"))}
+      {chart("睡眠", (d) => d.sleepMin, sleepTop, [0, sleepTop], formatMinutes, formatMinutes)}
+      {chart("調子", (d) => ratings[d.date] ?? null, 3, [1, 2, 3], (v) => RATING_LABELS[v] ?? "", () => "")}
+      <div style={{ display: "grid", gridTemplateColumns: `${AXIS_W} minmax(0, 1fr)`, gap: 6, marginTop: 8 }}>
+        <span />
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${week.length}, minmax(0, 1fr))`, gap: 3 }}>
+          {week.map((d) => {
+            const [y, m, dd] = d.date.split("-").map(Number);
+            const on = d.date === selected;
+            return (
+              <button
+                key={d.date}
+                type="button"
+                onClick={() => onPick(d.date)}
+                style={{ all: "unset", boxSizing: "border-box", textAlign: "center", padding: "6px 0", fontSize: "0.66rem", lineHeight: 1.4, cursor: "pointer", color: on ? ACCENT_BODY : TEXT_MUTED, fontWeight: on ? 700 : 400, fontFamily: "inherit" }}
+              >
+                {m}/{dd}
+                <br />
+                {WEEK[new Date(y, m - 1, dd).getDay()]}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -283,6 +317,12 @@ type Metric = {
   /** 棒の高さの基準（最大値の下限）と、棒の下限（0 以外にしたい項目だけ） */
   scaleMax: number;
   floor: number;
+  /** 縦軸の上端（省略すると、きりのいい数に切り上げる） */
+  top?: (max: number) => number;
+  /** 縦軸の目盛り（省略すると、下・真ん中・上） */
+  ticks?: number[];
+  /** 縦軸の数字の出し方（省略すると text と同じ） */
+  axis?: (v: number) => string;
 };
 
 const METRICS: Metric[] = [
@@ -309,6 +349,7 @@ const METRICS: Metric[] = [
     },
     scaleMax: 480,
     floor: 0,
+    top: (max) => Math.max(480, Math.ceil(max / 120) * 120), // 2時間きざみ（8:00 / 10:00）
   },
   {
     key: "deepPct",
@@ -338,7 +379,8 @@ const METRICS: Metric[] = [
     text: (v) => (Math.round(v * 10) / 10).toFixed(1),
     sub: (d) => (d.spo2Min !== null ? `最低 ${Math.round(d.spo2Min)}%` : ""),
     scaleMax: 100,
-    floor: 85, // 90% 台の差が見えるよう、85% からの高さにする
+    floor: 80, // 90% 台の差が見えるよう、80% からの高さにする
+    axis: (v) => String(Math.round(v)),
   },
   {
     key: "kcal",
@@ -362,6 +404,7 @@ const METRICS: Metric[] = [
     },
     scaleMax: 30,
     floor: 10, // 睡眠中の室温の差が見えるよう、10℃ からの高さにする
+    axis: (v) => String(Math.round(v)),
   },
   {
     key: "roomHum",
@@ -378,10 +421,13 @@ const METRICS: Metric[] = [
     label: "調子",
     unit: "",
     value: (d, c) => c.ratings[d.date] ?? null,
-    text: (v) => (Number.isInteger(v) ? `${v}（${RATING_LABELS[v]}）` : (Math.round(v * 10) / 10).toFixed(1)),
+    text: (v) => (Number.isInteger(v) ? RATING_LABELS[v] : (Math.round(v * 10) / 10).toFixed(1)),
     sub: () => "",
-    scaleMax: 5,
+    scaleMax: 3,
     floor: 0,
+    top: () => 3,
+    ticks: [1, 2, 3],
+    axis: (v) => RATING_LABELS[v] ?? "",
   },
 ];
 
@@ -468,7 +514,6 @@ const RoomLink: React.FC<{ days: BodyDay[]; ctx: Ctx }> = ({ days, ctx }) => {
         {col("低めの晩", low)}
         {col("高めの晩", high)}
       </div>
-      <div style={{ marginTop: 10, fontSize: "0.7rem", color: TEXT_MUTED, lineHeight: 1.6 }}>室温の低い半分と高い半分に分けた平均です。晩数が少ないうちは目安として。</div>
     </div>
   );
 };
@@ -490,10 +535,11 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
   const max = values.length === 0 ? null : Math.max(...values);
   const min = values.length === 0 ? null : Math.min(...values);
   const todayV = metric.value(day, ctx);
-  const scaleTop = Math.max(metric.scaleMax, max ?? 0);
+  const scaleTop = metric.top ? metric.top(max ?? 0) : niceTop(Math.max(metric.scaleMax, max ?? 0));
+  const ticks = metric.ticks ?? [metric.floor, (metric.floor + scaleTop) / 2, scaleTop];
+  const axisText = (v: number): string => (metric.axis ? metric.axis(v) : metric.text(v));
   const bars = [...withV].reverse(); // 左が古い日
-  const showNumbers = bars.length <= 7;
-  const barH = (v: number): number => Math.max(2, Math.round(((v - metric.floor) / (scaleTop - metric.floor)) * 90));
+  const showNumbers = bars.length <= 7 && metric.key !== "rating";
   const stat = (label: string, v: number | null) => (
     <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: "0.7rem", color: TEXT_MUTED }}>{label}</div>
@@ -524,36 +570,36 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
           })}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, bars.length)}, minmax(0, 1fr))`, gap: bars.length > 30 ? 1 : 3, alignItems: "end", height: 120, marginTop: 14 }}>
-          {bars.map(({ d, v }) => {
-            const on = d.date === day.date;
-            return (
-              <button
-                key={d.date}
-                type="button"
-                onClick={() => onPick(d.date)}
-                aria-label={`${formatDayLabel(d.date)}を開く`}
-                style={{ all: "unset", boxSizing: "border-box", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", minWidth: 0 }}
-              >
-                {showNumbers && <span style={{ fontSize: "0.6rem", textAlign: "center", color: on ? TEXT_MAIN : TEXT_SUB, marginBottom: 3, whiteSpace: "nowrap" }}>{v === null ? "" : metric.key === "sleep" ? shortSleep(v) : metric.text(v).split("（")[0]}</span>}
-                <span style={{ display: "block", height: v === null ? 2 : barH(v), background: v === null ? LINE : ACCENT_BODY, opacity: on || v === null ? 1 : 0.55, borderRadius: 1 }} />
-              </button>
-            );
-          })}
+        <div style={{ marginTop: 14 }}>
+          <BarChart
+            floor={metric.floor}
+            top={scaleTop}
+            ticks={ticks}
+            tickText={axisText}
+            gap={bars.length > 30 ? 1 : 3}
+            bars={bars.map(({ d, v }) => ({
+              key: d.date,
+              v,
+              label: showNumbers && v !== null ? metric.text(v) : undefined,
+              on: d.date === day.date,
+              aria: `${formatDayLabel(d.date)}を開く`,
+              onClick: () => onPick(d.date),
+            }))}
+          >
+            {bars.length > 1 && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: "0.68rem", color: TEXT_MUTED }}>
+                <span>{formatDayLabel(bars[0].d.date)}</span>
+                <span>{formatDayLabel(bars[bars.length - 1].d.date)}</span>
+              </div>
+            )}
+          </BarChart>
         </div>
-        {bars.length > 1 && (
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: "0.68rem", color: TEXT_MUTED }}>
-            <span>{formatDayLabel(bars[0].d.date)}</span>
-            <span>{formatDayLabel(bars[bars.length - 1].d.date)}</span>
-          </div>
-        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${LINE}` }}>
           {stat("平均", avg)}
           {stat("最高", max)}
           {stat("最低", min)}
         </div>
-        <div style={{ marginTop: 8, fontSize: "0.7rem", color: TEXT_MUTED }}>{values.length}日分の記録</div>
       </div>
 
       <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 6px" }}>
@@ -577,36 +623,6 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
     </>
   );
 };
-
-/** 過去の1日分（タップするとその日を上に出す） */
-const HistoryRow: React.FC<{ day: BodyDay; rating: number | null; active: boolean; onPick: () => void }> = ({ day, rating, active, onPick }) => (
-  <button
-    type="button"
-    onClick={onPick}
-    style={{
-      all: "unset",
-      boxSizing: "border-box",
-      width: "100%",
-      display: "grid",
-      gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 1.4rem",
-      gap: 8,
-      alignItems: "baseline",
-      padding: "12px 2px",
-      borderTop: `1px solid ${LINE}`,
-      cursor: "pointer",
-      color: active ? ACCENT_BODY : TEXT_MAIN,
-      fontFamily: "inherit",
-    }}
-  >
-    <span style={{ fontSize: "0.88rem" }}>{formatDayLabel(day.date)}</span>
-    <span style={{ fontSize: "0.88rem", textAlign: "right" }}>
-      {stepsText(day)}
-      <span style={{ color: TEXT_MUTED, fontSize: "0.7rem" }}> 歩</span>
-    </span>
-    <span style={{ fontSize: "0.88rem", textAlign: "right", color: TEXT_SUB }}>{sleepText(day)}</span>
-    <span style={{ fontSize: "0.88rem", textAlign: "right", color: rating === null ? LINE_2 : ACCENT_BODY }}>{rating ?? "·"}</span>
-  </button>
-);
 
 const NavButton: React.FC<{ label: string; disabled: boolean; onClick: () => void }> = ({ label, disabled, onClick }) => (
   <button
@@ -636,11 +652,21 @@ const SleepPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: (da
         <StageBar day={day} />
       </Tile>
       <SleepTimeline day={day} samples={ctx.samples} />
-      <div style={{ display: "grid", gridTemplateColumns: TWO_COLS, gap: 10 }}>
-        <Tile label="睡眠中の心拍" value={day.hrSleepAvg == null ? "—" : String(day.hrSleepAvg)} unit="回/分" sub={day.hrSleepMin != null ? `最低 ${day.hrSleepMin}` : undefined} />
-        <Tile label="血中酸素" value={day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg))} unit="%" sub={day.spo2Min !== null ? `最低 ${Math.round(day.spo2Min)}%` : undefined} />
-        <Tile label="睡眠中の室温" value={room ? room.tempAvg.toFixed(1) : "—"} unit="℃" sub={room ? `${room.tempMin.toFixed(1)}〜${room.tempMax.toFixed(1)}` : undefined} />
-        <Tile label="睡眠中の湿度" value={room ? String(Math.round(room.humAvg)) : "—"} unit="%" sub={room ? undefined : "SwitchBot 未連携か、記録なし"} />
+      <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+        {[
+          { label: "心拍", value: day.hrSleepAvg == null ? "—" : String(day.hrSleepAvg), unit: "" },
+          { label: "血中酸素", value: day.spo2Avg === null ? "—" : String(Math.round(day.spo2Avg)), unit: "%" },
+          { label: "室温", value: room ? room.tempAvg.toFixed(1) : "—", unit: "℃" },
+          { label: "湿度", value: room ? String(Math.round(room.humAvg)) : "—", unit: "%" },
+        ].map((x) => (
+          <div key={x.label} style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "0.68rem", color: TEXT_MUTED, whiteSpace: "nowrap" }}>{x.label}</div>
+            <div style={{ marginTop: 4, fontSize: "1.05rem", fontWeight: 600, color: TEXT_MAIN, whiteSpace: "nowrap" }}>
+              {x.value}
+              {x.value !== "—" && x.unit && <span style={{ fontSize: "0.68rem", fontWeight: 400, color: TEXT_MUTED }}>{x.unit}</span>}
+            </div>
+          </div>
+        ))}
       </div>
 
       <RoomLink days={days} ctx={ctx} />
@@ -819,21 +845,6 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                   <RatingCard rating={ratings[day.date] ?? null} onChange={changeRating} />
                   <WeekBars days={days} ratings={ratings} selected={day.date} onPick={pick} />
 
-                  <div style={{ ...cardStyle, marginBottom: 0, padding: "14px 16px 6px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 6 }}>
-                      <span style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>これまで</span>
-                      <span style={{ fontSize: "0.7rem", color: TEXT_MUTED }}>歩数　睡眠　調子</span>
-                    </div>
-                    {days.map((d, i) => {
-                      const newMonth = i === 0 || monthOf(days[i - 1].date) !== monthOf(d.date);
-                      return (
-                        <React.Fragment key={d.date}>
-                          {newMonth && <div style={{ fontSize: "0.72rem", color: ACCENT_BODY, margin: i === 0 ? "6px 0 2px" : "18px 0 2px" }}>{monthOf(d.date)}</div>}
-                          <HistoryRow day={d} rating={ratings[d.date] ?? null} active={d.date === day.date} onPick={() => pick(d.date)} />
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
                 </>
               ) : (
                 <>
@@ -849,9 +860,6 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
               <button type="button" disabled={loading} onClick={() => setRange((r) => r + 180)} style={{ ...secondaryButtonStyle, width: "100%" }}>
                 {loading ? "読み込み中…" : "さらに前を見る"}
               </button>
-              <p style={{ margin: "0 4px", fontSize: "0.75rem", color: TEXT_MUTED, lineHeight: 1.6 }}>
-                記録はクラウドにずっと残ります。この端末には直近の分だけ控えています。
-              </p>
             </>
           )}
 

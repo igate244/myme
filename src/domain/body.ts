@@ -240,23 +240,26 @@ export const summarizeRoom = (samples: RoomSample[], startMs: number, endMs: num
   };
 };
 
-/* ------------------------------------------------------ その日の調子（5段階） */
+/* ------------------------------------------------------ その日の調子（3段階） */
 
-/** 1〜5 の調子。自分で付ける記録なので、中継アプリの上書きに巻き込まれないよう別のコレクション（bodyRatings）に置く */
-export const RATING_LABELS: Record<number, string> = { 1: "だめ", 2: "いまいち", 3: "ふつう", 4: "いい", 5: "最高" };
+/** 1〜3 の調子。自分で付ける記録なので、中継アプリの上書きに巻き込まれないよう別のコレクション（bodyRatings）に置く */
+export const RATING_LABELS: Record<number, string> = { 1: "いまいち", 2: "ふつう", 3: "いい" };
 
-/** 1〜5 の整数だけ通す。それ以外は null */
+/** 1〜3 の整数だけ通す。それ以外は null */
 export const normalizeRating = (v: unknown): number | null =>
-  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 3 ? v : null;
+
+/** 5段階だった頃の記録（scale が無い）を3段階にする：1・2→1、3→2、4・5→3 */
+export const migrateOldRating = (v: unknown): number | null =>
+  typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5 ? (v <= 2 ? 1 : v === 3 ? 2 : 3) : null;
 
 /* ------------------------------------------------------------ 表示用の整形 */
 
-/** 分 → 「7時間32分」「45分」 */
+/** 分 → 「7:32」「0:45」（時:分） */
 export const formatMinutes = (min: number | null): string => {
   if (min === null) return "—";
   const m = Math.round(min);
-  if (m < 60) return `${m}分`;
-  return `${Math.floor(m / 60)}時間${String(m % 60).padStart(2, "0")}分`;
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 };
 
 /** 時刻（ミリ秒）→ 「22:34」（端末の時刻） */

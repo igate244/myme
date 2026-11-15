@@ -16,7 +16,7 @@ export const STAGE_META: { stage: 0 | 1 | 2 | 3; name: string; color: string }[]
   { stage: 3, name: "深い", color: ACCENT_STRONG },
 ];
 
-const LABEL_W = "3.6rem";
+const LABEL_W = "4.6rem";
 const LANE_H = 24;
 const W = 1000; // 横の座標は 0〜1000 に正規化して描く
 
@@ -47,17 +47,24 @@ const TrendRow: React.FC<{ row: Row; t0: number; t1: number; ticks: number[] }> 
   const y = (v: number): number => 6 + (1 - (v - lo) / span) * (H - 12);
   return (
     <div style={{ display: "grid", gridTemplateColumns: `${LABEL_W} minmax(0, 1fr)`, gap: 8, alignItems: "center", marginTop: 10 }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: "0.72rem", color: row.color }}>{row.label}</div>
-        <div style={{ fontSize: "0.66rem", color: TEXT_MUTED, lineHeight: 1.4 }}>
-          {row.fmt(lo)}〜{row.fmt(hi)}
+      {/* 縦軸：名前を真ん中、最大を上・最小を下に（折れ線の上端・下端と同じ高さ） */}
+      <div style={{ position: "relative", height: H, minWidth: 0 }}>
+        <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, display: "flex", alignItems: "center", fontSize: "0.72rem", color: row.color }}>{row.label}</span>
+        <span style={{ position: "absolute", right: 0, top: 6 - 7, fontSize: "0.62rem", lineHeight: "14px", color: TEXT_MUTED, whiteSpace: "nowrap" }}>
+          {row.fmt(hi)}
           {row.unit}
-        </div>
+        </span>
+        <span style={{ position: "absolute", right: 0, top: H - 6 - 7, fontSize: "0.62rem", lineHeight: "14px", color: TEXT_MUTED, whiteSpace: "nowrap" }}>
+          {row.fmt(lo)}
+          {row.unit}
+        </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height={H} style={{ display: "block" }} role="img" aria-label={`${row.label}の推移`}>
         {ticks.map((t) => (
           <line key={t} x1={x(t)} x2={x(t)} y1={0} y2={H} stroke={LINE} strokeWidth={1} vectorEffect="non-scaling-stroke" />
         ))}
+        <line x1={0} x2={W} y1={6} y2={6} stroke={LINE} strokeWidth={1} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+        <line x1={0} x2={W} y1={H - 6} y2={H - 6} stroke={LINE} strokeWidth={1} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
         <polyline
           fill="none"
           stroke={row.color}

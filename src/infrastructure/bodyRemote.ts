@@ -3,7 +3,7 @@
 // Firestore の SDK は gstatic から、「からだ」を開いたときだけ読み込む。
 // 取れたものは localStorage に控えて、オフラインでも前回の分を見られるようにする。
 
-import { encodePairingCode, groupRoomByDate, mergeRoomStrings, normalizeBodyDayPlain, normalizeRating } from "../domain/body";
+import { encodePairingCode, groupRoomByDate, mergeRoomStrings, migrateOldRating, normalizeBodyDayPlain, normalizeRating } from "../domain/body";
 import type { RoomSample } from "../domain/body";
 import type { BodyDay } from "../domain/body";
 import { loadAuth, loadFirestore } from "./firebaseClient";
@@ -64,7 +64,8 @@ export const makePairingCode = async (uid: string): Promise<string> => {
 
 /* ------------------------------------------------ その日の調子（users/{uid}/bodyRatings/{日付}） */
 
-const RATING_CACHE_KEY = "myme.bodyRatings";
+// 3段階にした時に控えの名前も変えた（5段階の値が混ざらないように）
+const RATING_CACHE_KEY = "myme.bodyRatings3";
 
 export type RatingMap = Record<string, number>;
 
@@ -93,7 +94,9 @@ export const fetchRatings = async (uid: string): Promise<RatingMap> => {
   const snap = await mod.getDocs(mod.collection(db, "users", uid, "bodyRatings"));
   const map: RatingMap = {};
   snap.docs.forEach((d: any) => {
-    const r = normalizeRating(d.data()?.rating);
+    const data = d.data();
+    // scale: 3 が付いていれば3段階。付いていない古い記録は5段階なので変換する
+    const r = data?.scale === 3 ? normalizeRating(data?.rating) : migrateOldRating(data?.rating);
     if (r !== null) map[d.id] = r;
   });
   cacheRatings(map);
@@ -106,7 +109,7 @@ export const saveRating = async (uid: string, date: string, rating: number | nul
   const { db, mod } = await loadFirestore();
   const ref = mod.doc(db, "users", uid, "bodyRatings", date);
   if (rating === null) await mod.deleteDoc(ref);
-  else await mod.setDoc(ref, { rating, updatedAt: Date.now() });
+  else await mod.setDoc(ref, { rating, scale: 3, updatedAt: Date.now() });
 };
 
 /** 控えの調子を 1 日分だけ書き換える（保存の成功を待たず画面に出すため） */

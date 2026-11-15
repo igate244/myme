@@ -33,8 +33,9 @@ test("1日分：壊れた運動データや空のドキュメントでも落ち�
 });
 
 test("分の表示", () => {
-  assert.equal(formatMinutes(452), "7時間32分");
-  assert.equal(formatMinutes(45), "45分");
+  assert.equal(formatMinutes(452), "7:32");
+  assert.equal(formatMinutes(141), "2:21");
+  assert.equal(formatMinutes(45), "0:45");
   assert.equal(formatMinutes(null), "—");
 });
 
@@ -54,16 +55,18 @@ test("SDK の data()（普通の値）からも同じ形になる", () => {
   assert.equal(normalizeBodyDayPlain("x", undefined).steps, null);
 });
 
-test("消費カロリーと調子：カロリーは欠けていれば null、調子は 1〜5 の整数だけ", async () => {
-  const { normalizeRating } = await import("../src/domain/body.ts");
+test("消費カロリーと調子：カロリーは欠けていれば null、調子は 1〜3 の整数だけ（5段階の古い記録は変換）", async () => {
+  const { normalizeRating, migrateOldRating } = await import("../src/domain/body.ts");
   const day = normalizeBodyDay("2026-11-14", { kcalTotal: { integerValue: "2410" }, kcalActive: { integerValue: "520" } });
   assert.equal(day.kcalTotal, 2410);
   assert.equal(day.kcalActive, 520);
   assert.equal(normalizeBodyDay("2026-11-14", {}).kcalTotal, null);
-  assert.equal(normalizeRating(4), 4);
+  assert.equal(normalizeRating(3), 3);
+  assert.equal(normalizeRating(4), null);
   assert.equal(normalizeRating(0), null);
-  assert.equal(normalizeRating(3.5), null);
-  assert.equal(normalizeRating("5"), null);
+  assert.equal(normalizeRating(2.5), null);
+  assert.equal(normalizeRating("3"), null);
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map(migrateOldRating), [1, 1, 2, 3, 3, null]);
 });
 
 test("部屋の温湿度：文字列を読み、睡眠の時間帯だけ平均する。壊れた行は飛ばす", async () => {
