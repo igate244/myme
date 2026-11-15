@@ -20,6 +20,7 @@ import {
   makePairingCode,
   saveRating,
 } from "../infrastructure/bodyRemote";
+import MonthCalendar from "./body/MonthCalendar";
 import { STAGE_META, SleepTimeline } from "./body/SleepTimeline";
 import SectionHeader from "./SectionHeader";
 import {
@@ -308,7 +309,7 @@ type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary>; samples: Roo
 
 type MetricKey = "steps" | "sleep" | "deepPct" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 /** 上のタブ。睡眠に関わる項目（睡眠時間・深い睡眠・心拍・血中酸素・室温・湿度）は「睡眠」の1ページにまとめてある */
-type Tab = "all" | "steps" | "sleep" | "kcal" | "rating";
+type Tab = "all" | "month" | "steps" | "sleep" | "kcal" | "rating";
 
 type Metric = {
   key: MetricKey;
@@ -442,6 +443,7 @@ const METRICS: Metric[] = [
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "すべて" },
+  { key: "month", label: "月" },
   { key: "steps", label: "歩数" },
   { key: "sleep", label: "睡眠" },
   { key: "kcal", label: "カロリー" },
@@ -780,6 +782,13 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  /** 月カレンダーで昔の月を開いたとき、その月の1日まで読み込み範囲を広げる */
+  const needFrom = (date: string): void => {
+    const [y, m, d] = date.split("-").map(Number);
+    const diff = Math.ceil((Date.now() - new Date(y, m - 1, d).getTime()) / 86400000) + 1;
+    setRange((r) => Math.max(r, diff));
+  };
+
   const pick = (date: string): void => {
     setSelected(date);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -858,7 +867,19 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
                 </>
               ) : (
                 <>
-                  {tab === "sleep" ? (
+                  {tab === "month" ? (
+                    <MonthCalendar
+                      days={days}
+                      ratings={ratings}
+                      selected={day.date}
+                      loading={loading}
+                      onOpenDay={(date) => {
+                        setSelected(date);
+                        openTab("all");
+                      }}
+                      onNeedFrom={needFrom}
+                    />
+                  ) : tab === "sleep" ? (
                     <SleepPage days={days} ctx={ctx} day={day} onPick={pick} />
                   ) : (
                     <MetricDetail metric={metricOf(tab)} days={days} ctx={ctx} day={day} onPick={pick} />

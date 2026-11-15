@@ -1,7 +1,7 @@
 // 「からだ」のデータ変換（Firestore の REST の形 → 画面で使う形）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
+import { buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
 
 test("Firestore の値：整数は文字列で来るので数値にする", () => {
   assert.equal(decodeFsValue({ integerValue: "8229" }), 8229);
@@ -116,4 +116,33 @@ test("睡眠の時間ごとの記録：段階と心拍・血中酸素の並び�
   assert.equal(day.hrSeries[0].value, 50);
   assert.equal(day.spo2Series[0].value, 96);
   assert.deepEqual(normalizeBodyDayPlain("x", {}).sleepStages, []);
+});
+
+test("月カレンダー：日曜はじまり・週ごと・空きで埋める", () => {
+  const weeks = buildMonthGrid(2026, 11); // 2026-11-01 は日曜
+  assert.equal(weeks[0][0].date, "2026-11-01");
+  assert.equal(weeks.length, 5);
+  assert.ok(weeks.every((w) => w.length === 7));
+  assert.equal(weeks[4][1].date, "2026-11-30");
+  assert.equal(weeks[4][2].date, null);
+  const oct = buildMonthGrid(2026, 10); // 2026-10-01 は木曜
+  assert.equal(oct[0][3].date, null);
+  assert.equal(oct[0][4].date, "2026-10-01");
+});
+
+test("睡眠の判定：7時間ちょうどは足りてる、記録なしは none", () => {
+  assert.equal(judgeSleep(420), "enough");
+  assert.equal(judgeSleep(419), "short");
+  assert.equal(judgeSleep(null), "none");
+});
+
+test("月の集計：今日より後の日は数えない", () => {
+  const weeks = buildMonthGrid(2026, 11);
+  const sleep: Record<string, number> = { "2026-11-01": 450, "2026-11-02": 300, "2026-11-03": 420 };
+  const s = summarizeMonth(weeks, (d) => sleep[d] ?? null, (d) => (d === "2026-11-01" ? 3 : d === "2026-11-02" ? 1 : null), "2026-11-05");
+  assert.equal(s.enough, 2);
+  assert.equal(s.short, 1);
+  assert.equal(s.none, 2); // 4日・5日
+  assert.equal(Math.round(s.avgSleepMin ?? 0), 390);
+  assert.deepEqual(s.ratingCounts, { 1: 1, 2: 0, 3: 1 });
 });

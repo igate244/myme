@@ -253,6 +253,64 @@ export const normalizeRating = (v: unknown): number | null =>
 export const migrateOldRating = (v: unknown): number | null =>
   typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5 ? (v <= 2 ? 1 : v === 3 ? 2 : 3) : null;
 
+/* ------------------------------------------------------------ 月のカレンダー */
+
+/** 睡眠が足りているかの基準（分）。7時間 */
+export const SLEEP_TARGET_MIN = 420;
+
+/** 睡眠の判定：足りてる / 足りない / 記録なし */
+export type SleepJudge = "enough" | "short" | "none";
+export const judgeSleep = (sleepMin: number | null): SleepJudge =>
+  sleepMin === null ? "none" : sleepMin >= SLEEP_TARGET_MIN ? "enough" : "short";
+
+/** 月カレンダーの1マス。date が null のマスは前後の月の空き */
+export type MonthCell = { date: string | null; day: number | null };
+
+/** month は 1〜12。日曜はじまりで、週ごとの配列にする（最後の週は空きで埋める） */
+export const buildMonthGrid = (year: number, month: number): MonthCell[][] => {
+  const first = new Date(year, month - 1, 1).getDay();
+  const last = new Date(year, month, 0).getDate();
+  const cells: MonthCell[] = [];
+  for (let i = 0; i < first; i++) cells.push({ date: null, day: null });
+  for (let d = 1; d <= last; d++) cells.push({ date: `${year}-${pad2(month)}-${pad2(d)}`, day: d });
+  while (cells.length % 7 !== 0) cells.push({ date: null, day: null });
+  const weeks: MonthCell[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+};
+
+export type MonthSummary = { enough: number; short: number; none: number; avgSleepMin: number | null; ratingCounts: Record<1 | 2 | 3, number> };
+
+/** その月の集計。today より後の日は「記録なし」に数えない（まだ来てないだけ） */
+export const summarizeMonth = (
+  weeks: MonthCell[][],
+  sleepOf: (date: string) => number | null,
+  ratingOf: (date: string) => number | null,
+  today: string,
+): MonthSummary => {
+  let enough = 0;
+  let short = 0;
+  let none = 0;
+  let sum = 0;
+  let n = 0;
+  const ratingCounts: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 };
+  for (const c of weeks.flat()) {
+    if (!c.date || c.date > today) continue;
+    const m = sleepOf(c.date);
+    const j = judgeSleep(m);
+    if (j === "enough") enough++;
+    else if (j === "short") short++;
+    else none++;
+    if (m !== null) {
+      sum += m;
+      n++;
+    }
+    const r = ratingOf(c.date);
+    if (r === 1 || r === 2 || r === 3) ratingCounts[r]++;
+  }
+  return { enough, short, none, avgSleepMin: n === 0 ? null : sum / n, ratingCounts };
+};
+
 /* ------------------------------------------------------------ 表示用の整形 */
 
 /** 分 → 「7:32」「0:45」（時:分） */
