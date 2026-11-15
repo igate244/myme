@@ -63,16 +63,20 @@ const niceTop = (v: number): number => {
 };
 
 const AXIS_W = "2.8rem";
+/** 基準線：睡眠は7時間、歩数は6,000歩（グラフに色つきの線で出す） */
+const SLEEP_TARGET = 420;
+const STEPS_TARGET = 6000;
 
 type Bar = { key: string; v: number | null; label?: string; on: boolean; aria: string; onClick: () => void };
 
 /** 縦軸（目盛りの数字と薄い横線）つきの棒グラフ。floor〜top の間で棒の高さを決める */
-const BarChart: React.FC<{ bars: Bar[]; floor: number; top: number; ticks: number[]; tickText: (v: number) => string; plotH?: number; gap?: number; children?: React.ReactNode }> = ({
+const BarChart: React.FC<{ bars: Bar[]; floor: number; top: number; ticks: number[]; tickText: (v: number) => string; target?: number; plotH?: number; gap?: number; children?: React.ReactNode }> = ({
   bars,
   floor,
   top,
   ticks,
   tickText,
+  target,
   plotH = 100,
   gap = 3,
   children,
@@ -83,7 +87,7 @@ const BarChart: React.FC<{ bars: Bar[]; floor: number; top: number; ticks: numbe
     <div style={{ display: "grid", gridTemplateColumns: `${AXIS_W} minmax(0, 1fr)`, gap: 6 }}>
       <div style={{ position: "relative", height: boxH }}>
         {ticks.map((t) => (
-          <span key={t} style={{ position: "absolute", right: 0, bottom: frac(t) * plotH - 7, fontSize: "0.62rem", lineHeight: "14px", color: TEXT_MUTED, whiteSpace: "nowrap" }}>
+          <span key={t} style={{ position: "absolute", right: 0, bottom: frac(t) * plotH - 7, fontSize: "0.62rem", lineHeight: "14px", color: t === target ? ACCENT_BODY : TEXT_MUTED, whiteSpace: "nowrap" }}>
             {tickText(t)}
           </span>
         ))}
@@ -91,7 +95,7 @@ const BarChart: React.FC<{ bars: Bar[]; floor: number; top: number; ticks: numbe
       <div style={{ minWidth: 0 }}>
         <div style={{ position: "relative", height: boxH }}>
           {ticks.map((t) => (
-            <div key={t} style={{ position: "absolute", left: 0, right: 0, bottom: frac(t) * plotH, height: 1, background: LINE }} />
+            <div key={t} style={{ position: "absolute", left: 0, right: 0, bottom: frac(t) * plotH, height: 1, background: t === target ? ACCENT_BODY : LINE, opacity: t === target ? 0.7 : 1 }} />
           ))}
           <div style={{ position: "absolute", inset: 0, display: "grid", gridTemplateColumns: `repeat(${Math.max(1, bars.length)}, minmax(0, 1fr))`, gap, alignItems: "end" }}>
             {bars.map((b) => (
@@ -247,9 +251,9 @@ const RatingCard: React.FC<{ rating: number | null; onChange: (r: number | null)
 const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string; onPick: (date: string) => void }> = ({ days, ratings, selected, onPick }) => {
   const week = days.slice(0, 7).reverse();
   if (week.length < 2) return null;
-  const stepsTop = niceTop(Math.max(1, ...week.map((d) => d.steps ?? 0)));
-  const sleepTop = Math.max(480, Math.ceil(Math.max(0, ...week.map((d) => d.sleepMin ?? 0)) / 120) * 120);
-  const chart = (title: string, value: (d: BodyDay) => number | null, top: number, ticks: number[], tickText: (v: number) => string, text: (v: number) => string) => (
+  const stepsTop = niceTop(Math.max(STEPS_TARGET * 1.5, ...week.map((d) => d.steps ?? 0)));
+  const sleepTop = Math.max(540, Math.ceil(Math.max(0, ...week.map((d) => d.sleepMin ?? 0)) / 60) * 60);
+  const chart = (title: string, value: (d: BodyDay) => number | null, top: number, ticks: number[], tickText: (v: number) => string, text: (v: number) => string, target?: number) => (
     <div style={{ marginTop: 16 }}>
       <div style={{ fontSize: "0.72rem", color: TEXT_MUTED, marginBottom: 6 }}>{title}</div>
       <BarChart
@@ -258,6 +262,7 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
         top={top}
         ticks={ticks}
         tickText={tickText}
+        target={target}
         bars={week.map((d) => {
           const v = value(d);
           return { key: d.date, v, label: v === null ? undefined : text(v) || undefined, on: d.date === selected, aria: `${formatDayLabel(d.date)}を開く`, onClick: () => onPick(d.date) };
@@ -268,8 +273,8 @@ const WeekBars: React.FC<{ days: BodyDay[]; ratings: RatingMap; selected: string
   return (
     <div style={{ ...cardStyle, marginBottom: 0 }}>
       <div style={{ fontSize: "0.8rem", color: TEXT_SUB, fontWeight: 600 }}>この7日</div>
-      {chart("歩数", (d) => d.steps, stepsTop, [0, stepsTop], (v) => v.toLocaleString("ja-JP"), (v) => v.toLocaleString("ja-JP"))}
-      {chart("睡眠", (d) => d.sleepMin, sleepTop, [0, sleepTop], formatMinutes, formatMinutes)}
+      {chart("歩数", (d) => d.steps, stepsTop, [0, STEPS_TARGET, stepsTop], (v) => v.toLocaleString("ja-JP"), (v) => v.toLocaleString("ja-JP"), STEPS_TARGET)}
+      {chart("睡眠", (d) => d.sleepMin, sleepTop, [0, SLEEP_TARGET, sleepTop], formatMinutes, formatMinutes, SLEEP_TARGET)}
       {chart("調子", (d) => ratings[d.date] ?? null, 3, [1, 2, 3], (v) => RATING_LABELS[v] ?? "", () => "")}
       <div style={{ display: "grid", gridTemplateColumns: `${AXIS_W} minmax(0, 1fr)`, gap: 6, marginTop: 8 }}>
         <span />
@@ -321,6 +326,8 @@ type Metric = {
   top?: (max: number) => number;
   /** 縦軸の目盛り（省略すると、下・真ん中・上） */
   ticks?: number[];
+  /** 基準線（あれば縦軸の目盛りに入れ、色つきの線で引く） */
+  target?: number;
   /** 縦軸の数字の出し方（省略すると text と同じ） */
   axis?: (v: number) => string;
 };
@@ -333,8 +340,9 @@ const METRICS: Metric[] = [
     value: (d) => d.steps,
     text: (v) => Math.round(v).toLocaleString("ja-JP"),
     sub: (d) => (d.kcalActive == null ? "" : `活動 ${d.kcalActive.toLocaleString("ja-JP")} kcal`),
-    scaleMax: 1,
+    scaleMax: STEPS_TARGET * 1.5,
     floor: 0,
+    target: STEPS_TARGET,
   },
   {
     key: "sleep",
@@ -349,7 +357,8 @@ const METRICS: Metric[] = [
     },
     scaleMax: 480,
     floor: 0,
-    top: (max) => Math.max(480, Math.ceil(max / 120) * 120), // 2時間きざみ（8:00 / 10:00）
+    top: (max) => Math.max(540, Math.ceil(max / 60) * 60), // 基準線の7:00と近すぎないよう、最低9:00
+    target: SLEEP_TARGET,
   },
   {
     key: "deepPct",
@@ -536,7 +545,7 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
   const min = values.length === 0 ? null : Math.min(...values);
   const todayV = metric.value(day, ctx);
   const scaleTop = metric.top ? metric.top(max ?? 0) : niceTop(Math.max(metric.scaleMax, max ?? 0));
-  const ticks = metric.ticks ?? [metric.floor, (metric.floor + scaleTop) / 2, scaleTop];
+  const ticks = metric.ticks ?? (metric.target !== undefined ? [metric.floor, metric.target, scaleTop] : [metric.floor, (metric.floor + scaleTop) / 2, scaleTop]);
   const axisText = (v: number): string => (metric.axis ? metric.axis(v) : metric.text(v));
   const bars = [...withV].reverse(); // 左が古い日
   const showNumbers = bars.length <= 7 && metric.key !== "rating";
@@ -576,6 +585,7 @@ const MetricDetail: React.FC<{ metric: Metric; days: BodyDay[]; ctx: Ctx; day: B
             top={scaleTop}
             ticks={ticks}
             tickText={axisText}
+            target={metric.target}
             gap={bars.length > 30 ? 1 : 3}
             bars={bars.map(({ d, v }) => ({
               key: d.date,
