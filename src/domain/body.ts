@@ -423,7 +423,7 @@ export const sleepStreaks = (days: BodyDay[], today: string): { current: number;
   return { current, longest };
 };
 
-export type PeriodAvg = { sleepAvg: number | null; stepsAvg: number | null; ratingAvg: number | null };
+export type PeriodAvg = { sleepAvg: number | null; stepsAvg: number | null; ratingAvg: number | null; kcalActiveAvg: number | null };
 
 /** today までの7日と、その前の7日の平均（記録のある日だけで平均する） */
 export const weekCompare = (days: BodyDay[], ratingOf: (date: string) => number | null, today: string): { thisWeek: PeriodAvg; lastWeek: PeriodAvg } => {
@@ -434,9 +434,86 @@ export const weekCompare = (days: BodyDay[], ratingOf: (date: string) => number 
       sleepAvg: meanOf(inside.map((d) => d.sleepMin).filter((v): v is number => v !== null)),
       stepsAvg: meanOf(inside.map((d) => d.steps).filter((v): v is number => v !== null)),
       ratingAvg: meanOf(ratings),
+      kcalActiveAvg: meanOf(inside.map((d) => d.kcalActive).filter((v): v is number => v !== null)),
     };
   };
   return { thisWeek: avgBetween(shiftDate(today, -6), today), lastWeek: avgBetween(shiftDate(today, -13), shiftDate(today, -7)) };
+};
+
+/* ------------------------------------------------------------ 分析（カロリー） */
+
+/** 中央値（空なら null） */
+export const medianOf = (xs: number[]): number | null => {
+  if (xs.length === 0) return null;
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 === 1 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+
+export type KcalSummary = { n: number; activeAvg: number | null; totalAvg: number | null; activeShare: number | null };
+
+/** 活動カロリー・総消費の平均と、「総消費のうち活動が占める割合（%）」。割合は両方ある日だけで出す */
+export const kcalSummary = (days: BodyDay[]): KcalSummary => {
+  const active = days.map((d) => d.kcalActive).filter((v): v is number => v !== null);
+  const total = days.map((d) => d.kcalTotal).filter((v): v is number => v !== null);
+  const both = days.filter((d) => d.kcalActive !== null && d.kcalTotal !== null && d.kcalTotal > 0);
+  const share = both.length === 0 ? null : (both.reduce((a, d) => a + (d.kcalActive as number), 0) / both.reduce((a, d) => a + (d.kcalTotal as number), 0)) * 100;
+  return { n: active.length, activeAvg: meanOf(active), totalAvg: meanOf(total), activeShare: share };
+};
+
+/** 曜日ごと（0=日〜6=土）の活動カロリーの平均。記録が無い曜日は avg が null */
+export const kcalByWeekday = (days: BodyDay[]): { avg: number | null; n: number }[] => {
+  const buckets: number[][] = [[], [], [], [], [], [], []];
+  for (const d of days) {
+    if (d.kcalActive === null) continue;
+    const [y, m, dd] = d.date.split("-").map(Number);
+    buckets[new Date(y, m - 1, dd).getDay()].push(d.kcalActive);
+  }
+  return buckets.map((b) => ({ avg: meanOf(b), n: b.length }));
+};
+
+/** 日のグループの集計：日数・活動カロリーの平均・その夜（翌朝の記録）の睡眠・その日の調子の内訳 */
+export type DayGroupStats = { n: number; kcalAvg: number | null; nextSleepAvg: number | null; nextSleepN: number; rating: RatingSplit };
+
+const groupStats = (list: BodyDay[], byDate: Map<string, BodyDay>, ratingOf: (date: string) => number | null): DayGroupStats => {
+  const rating: RatingSplit = { n: 0, counts: { 1: 0, 2: 0, 3: 0 } };
+  const sleeps: number[] = [];
+  for (const d of list) {
+    const next = byDate.get(shiftDate(d.date, 1));
+    if (next && next.sleepMin !== null && next.sleepMin > 0) sleeps.push(next.sleepMin);
+    const r = ratingOf(d.date);
+    if (r === 1 || r === 2 || r === 3) {
+      rating.n++;
+      rating.counts[r]++;
+    }
+  }
+  return {
+    n: list.length,
+    kcalAvg: meanOf(list.map((d) => d.kcalActive).filter((v): v is number => v !== null)),
+    nextSleepAvg: meanOf(sleeps),
+    nextSleepN: sleeps.length,
+    rating,
+  };
+};
+
+/** 活動カロリーが多い日／少ない日（期間内の中央値で2つに分ける。中央値ちょうどは多い側） */
+export const splitByKcal = (days: BodyDay[], ratingOf: (date: string) => number | null): { threshold: number | null; high: DayGroupStats; low: DayGroupStats } => {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const withK = days.filter((d) => d.kcalActive !== null);
+  const threshold = medianOf(withK.map((d) => d.kcalActive as number));
+  const high = threshold === null ? [] : withK.filter((d) => (d.kcalActive as number) >= threshold);
+  const low = threshold === null ? [] : withK.filter((d) => (d.kcalActive as number) < threshold);
+  return { threshold, high: groupStats(high, byDate, ratingOf), low: groupStats(low, byDate, ratingOf) };
+};
+
+/** 運動（ワークアウト）をした日／しなかった日。歩数かカロリーの記録がある日だけを対象にする */
+export const splitByWorkout = (days: BodyDay[], ratingOf: (date: string) => number | null): { withWorkout: DayGroupStats; without: DayGroupStats } => {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const recorded = days.filter((d) => d.steps !== null || d.kcalActive !== null);
+  return {
+    withWorkout: groupStats(recorded.filter((d) => d.workouts.length > 0), byDate, ratingOf),
+    without: groupStats(recorded.filter((d) => d.workouts.length === 0), byDate, ratingOf),
+  };
 };
 
 /* ------------------------------------------------------------ 表示用の整形 */

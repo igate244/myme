@@ -1,7 +1,7 @@
 // 「からだ」のデータ変換（Firestore の REST の形 → 画面で使う形）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bedtimeSpread, bedtimesOf, formatBedtime, shiftDate, sleepDebt, sleepStreaks, sleepVsRating, stepsVsNextNight, weekCompare, buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
+import { kcalByWeekday, kcalSummary, medianOf, splitByKcal, splitByWorkout, bedtimeSpread, bedtimesOf, formatBedtime, shiftDate, sleepDebt, sleepStreaks, sleepVsRating, stepsVsNextNight, weekCompare, buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
 
 test("Firestore の値：整数は文字列で来るので数値にする", () => {
   assert.equal(decodeFsValue({ integerValue: "8229" }), 8229);
@@ -225,4 +225,62 @@ test("分析：今週と先週の平均", () => {
   assert.equal(w.thisWeek.ratingAvg, 3);
   assert.equal(w.lastWeek.sleepAvg, 300);
   assert.equal(w.lastWeek.ratingAvg, 1);
+});
+
+test("カロリー：中央値", () => {
+  assert.equal(medianOf([]), null);
+  assert.equal(medianOf([3, 1, 2]), 2);
+  assert.equal(medianOf([1, 2, 3, 4]), 2.5);
+});
+
+test("カロリー：平均と、総消費に占める活動の割合（両方ある日だけ）", () => {
+  const days = [mk("2026-11-01", { kcalActive: 300, kcalTotal: 2000 }), mk("2026-11-02", { kcalActive: 500, kcalTotal: 2200 }), mk("2026-11-03", { kcalActive: 999 })];
+  const k = kcalSummary(days);
+  assert.equal(k.n, 3);
+  assert.equal(Math.round(k.activeAvg ?? 0), 600);
+  assert.equal(k.totalAvg, 2100);
+  assert.equal(Math.round(k.activeShare ?? 0), 19); // (300+500)/(2000+2200)
+  assert.equal(kcalSummary([]).activeAvg, null);
+});
+
+test("カロリー：曜日別（日曜はじまり）", () => {
+  // 2026-11-15 は日曜、11-16 は月曜
+  const w = kcalByWeekday([mk("2026-11-15", { kcalActive: 100 }), mk("2026-11-22", { kcalActive: 300 }), mk("2026-11-16", { kcalActive: 50 }), mk("2026-11-17", {})]);
+  assert.equal(w[0].avg, 200);
+  assert.equal(w[0].n, 2);
+  assert.equal(w[1].avg, 50);
+  assert.equal(w[2].avg, null);
+});
+
+test("カロリー：多い日／少ない日（中央値で分ける）と、その夜の睡眠・その日の調子", () => {
+  const days = [
+    mk("2026-11-01", { kcalActive: 100 }),
+    mk("2026-11-02", { kcalActive: 500, sleepMin: 400 }), // 11/1 の夜
+    mk("2026-11-03", { kcalActive: 300, sleepMin: 480 }), // 11/2 の夜
+    mk("2026-11-04", { sleepMin: 360 }), // 11/3 の夜
+  ];
+  const r: Record<string, number> = { "2026-11-01": 1, "2026-11-02": 3, "2026-11-03": 3 };
+  const s = splitByKcal(days, (d) => r[d] ?? null);
+  assert.equal(s.threshold, 300);
+  assert.equal(s.high.n, 2); // 500・300
+  assert.equal(s.low.n, 1); // 100
+  assert.equal(s.low.nextSleepAvg, 400);
+  assert.equal(s.high.nextSleepAvg, 420); // (480+360)/2
+  assert.deepEqual(s.high.rating.counts, { 1: 0, 2: 0, 3: 2 });
+  assert.deepEqual(s.low.rating.counts, { 1: 1, 2: 0, 3: 0 });
+  assert.equal(splitByKcal([], () => null).threshold, null);
+});
+
+test("カロリー：運動をした日／しなかった日（記録のある日だけ対象）", () => {
+  const w = [{ type: 79, startMs: 1, endMs: 2, distanceM: null }];
+  const days = [
+    mk("2026-11-01", { steps: 5000, workouts: JSON.stringify([{ t: 79, s: 1, e: 2 }]) }),
+    mk("2026-11-02", { steps: 4000, sleepMin: 450 }),
+    mk("2026-11-03", {}), // 何の記録も無い日は数えない
+  ];
+  assert.equal(w.length, 1);
+  const r = splitByWorkout(days, () => null);
+  assert.equal(r.withWorkout.n, 1);
+  assert.equal(r.without.n, 1);
+  assert.equal(r.withWorkout.nextSleepAvg, 450);
 });
