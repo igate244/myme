@@ -1,7 +1,7 @@
 // 「からだ」のデータ変換（Firestore の REST の形 → 画面で使う形）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
+import { bedtimeSpread, bedtimesOf, formatBedtime, shiftDate, sleepDebt, sleepStreaks, sleepVsRating, stepsVsNextNight, weekCompare, buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
 
 test("Firestore の値：整数は文字列で来るので数値にする", () => {
   assert.equal(decodeFsValue({ integerValue: "8229" }), 8229);
@@ -145,4 +145,84 @@ test("月の集計：今日より後の日は数えない", () => {
   assert.equal(s.none, 2); // 4日・5日
   assert.equal(Math.round(s.avgSleepMin ?? 0), 390);
   assert.deepEqual(s.ratingCounts, { 1: 1, 2: 0, 3: 1 });
+});
+
+const mk = (date: string, o: Record<string, unknown> = {}) => normalizeBodyDayPlain(date, o);
+
+test("分析：日付をずらす（月またぎ）", () => {
+  assert.equal(shiftDate("2026-11-01", -1), "2026-10-31");
+  assert.equal(shiftDate("2026-11-30", 1), "2026-12-01");
+});
+
+test("分析：睡眠が足りた日／足りない日の調子の内訳", () => {
+  const days = [mk("2026-11-01", { sleepMin: 450 }), mk("2026-11-02", { sleepMin: 300 }), mk("2026-11-03", { sleepMin: 420 }), mk("2026-11-04", { sleepMin: null })];
+  const r: Record<string, number> = { "2026-11-01": 3, "2026-11-02": 1, "2026-11-03": 2, "2026-11-04": 3 };
+  const s = sleepVsRating(days, (d) => r[d] ?? null);
+  assert.equal(s.enough.n, 2);
+  assert.deepEqual(s.enough.counts, { 1: 0, 2: 1, 3: 1 });
+  assert.equal(s.short.n, 1);
+  assert.deepEqual(s.short.counts, { 1: 1, 2: 0, 3: 0 });
+});
+
+test("分析：歩いた日の夜は翌日の睡眠の記録を見る", () => {
+  const days = [
+    mk("2026-11-01", { steps: 8000 }),
+    mk("2026-11-02", { steps: 2000, sleepMin: 480, deepMin: 96 }), // 11/1 の夜
+    mk("2026-11-03", { steps: 9000, sleepMin: 360, deepMin: 36 }), // 11/2 の夜
+    mk("2026-11-04", { sleepMin: 420 }), // 11/3 の夜
+  ];
+  const r = stepsVsNextNight(days, 6000);
+  assert.equal(r.active.n, 2);
+  assert.equal(r.active.sleepAvg, 450);
+  assert.equal(r.quiet.n, 1);
+  assert.equal(r.quiet.sleepAvg, 360);
+  assert.equal(Math.round(r.quiet.deepPctAvg ?? -1), 10);
+});
+
+test("分析：睡眠負債は7時間に足りなかった分だけ足す", () => {
+  const days = [mk("2026-11-14", { sleepMin: 360 }), mk("2026-11-15", { sleepMin: 480 }), mk("2026-11-16", { sleepMin: 400 }), mk("2026-11-01", { sleepMin: 100 })];
+  const d = sleepDebt(days, "2026-11-16", 7);
+  assert.equal(d.debtMin, 60 + 0 + 20);
+  assert.equal(d.recorded, 3);
+});
+
+test("分析：就寝時刻は夜をまたいでも平均できる／昼寝は除く", () => {
+  const at = (h: number, m: number, day = 10) => new Date(2026, 10, day, h, m).getTime();
+  const days = [
+    mk("2026-11-11", { sleepStartMs: at(23, 0, 10) }),
+    mk("2026-11-12", { sleepStartMs: at(1, 0, 12) }), // 夜中の1時
+    mk("2026-11-13", { sleepStartMs: at(14, 0, 13) }), // 昼寝 → 除く
+  ];
+  const list = bedtimesOf(days);
+  assert.equal(list.length, 2);
+  assert.equal(formatBedtime(list[0].min), "23:00");
+  assert.equal(formatBedtime(list[1].min), "1:00");
+  const sp = bedtimeSpread(list);
+  assert.equal(formatBedtime(sp?.avg ?? 0), "0:00");
+  assert.equal(Math.round(sp?.sd ?? 0), 60);
+  assert.equal(bedtimeSpread([list[0]]), null);
+});
+
+test("分析：7時間以上の連続（記録の無い日は途切れ）", () => {
+  const days = [
+    mk("2026-11-10", { sleepMin: 450 }),
+    mk("2026-11-11", { sleepMin: 450 }),
+    mk("2026-11-12", { sleepMin: 450 }),
+    mk("2026-11-13", { sleepMin: 300 }),
+    mk("2026-11-14", { sleepMin: 430 }),
+    mk("2026-11-15", { sleepMin: 440 }),
+  ];
+  // 今日（11/16）はまだ記録が無い → 昨日から遡る
+  assert.deepEqual(sleepStreaks(days, "2026-11-16"), { current: 2, longest: 3 });
+  assert.deepEqual(sleepStreaks([], "2026-11-16"), { current: 0, longest: 0 });
+});
+
+test("分析：今週と先週の平均", () => {
+  const days = [mk("2026-11-16", { sleepMin: 400, steps: 6000 }), mk("2026-11-10", { sleepMin: 440 }), mk("2026-11-09", { sleepMin: 300, steps: 2000 }), mk("2026-11-01", { sleepMin: 999 })];
+  const w = weekCompare(days, (d) => (d === "2026-11-16" ? 3 : d === "2026-11-09" ? 1 : null), "2026-11-16");
+  assert.equal(w.thisWeek.sleepAvg, 420);
+  assert.equal(w.thisWeek.stepsAvg, 6000);
+  assert.equal(w.thisWeek.ratingAvg, 3);
+  assert.equal(w.lastWeek.sleepAvg, 300);
+  assert.equal(w.lastWeek.ratingAvg, 1);
 });

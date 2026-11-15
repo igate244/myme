@@ -311,6 +311,134 @@ export const summarizeMonth = (
   return { enough, short, none, avgSleepMin: n === 0 ? null : sum / n, ratingCounts };
 };
 
+/* ------------------------------------------------------------ 分析（睡眠・調子・歩数の関係） */
+
+/** 「2026-11-16」に n 日足す（引くときは負の数） */
+export const shiftDate = (date: string, n: number): string => {
+  const [y, m, d] = date.split("-").map(Number);
+  const x = new Date(y, m - 1, d + n);
+  return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
+};
+
+const meanOf = (xs: number[]): number | null => (xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length);
+
+/** 調子の内訳（n = 調子が付いている日の数） */
+export type RatingSplit = { n: number; counts: Record<1 | 2 | 3, number> };
+
+/** 睡眠が足りた日／足りない日で、その日の調子がどう分かれるか。睡眠か調子の記録が無い日は数えない */
+export const sleepVsRating = (days: BodyDay[], ratingOf: (date: string) => number | null): { enough: RatingSplit; short: RatingSplit } => {
+  const make = (): RatingSplit => ({ n: 0, counts: { 1: 0, 2: 0, 3: 0 } });
+  const out = { enough: make(), short: make() };
+  for (const d of days) {
+    const j = judgeSleep(d.sleepMin);
+    const r = ratingOf(d.date);
+    if (j === "none" || (r !== 1 && r !== 2 && r !== 3)) continue;
+    const g = j === "enough" ? out.enough : out.short;
+    g.n++;
+    g.counts[r]++;
+  }
+  return out;
+};
+
+export type NightStats = { n: number; sleepAvg: number | null; deepPctAvg: number | null };
+
+/** 歩いた日（steps が target 以上）／少なかった日の「その夜の睡眠」。睡眠は起きた日に入るので、翌日の記録を見る */
+export const stepsVsNextNight = (days: BodyDay[], target: number): { active: NightStats; quiet: NightStats } => {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const acc = { active: { sleeps: [] as number[], deeps: [] as number[] }, quiet: { sleeps: [] as number[], deeps: [] as number[] } };
+  for (const d of days) {
+    if (d.steps === null) continue;
+    const next = byDate.get(shiftDate(d.date, 1));
+    if (!next || next.sleepMin === null || next.sleepMin <= 0) continue;
+    const g = d.steps >= target ? acc.active : acc.quiet;
+    g.sleeps.push(next.sleepMin);
+    if (next.deepMin !== null) g.deeps.push((next.deepMin / next.sleepMin) * 100);
+  }
+  const stat = (g: { sleeps: number[]; deeps: number[] }): NightStats => ({ n: g.sleeps.length, sleepAvg: meanOf(g.sleeps), deepPctAvg: meanOf(g.deeps) });
+  return { active: stat(acc.active), quiet: stat(acc.quiet) };
+};
+
+/** today までの windowDays 日で、7時間に足りなかった分の合計（分）。記録のある日だけ数える */
+export const sleepDebt = (days: BodyDay[], today: string, windowDays: number): { debtMin: number; recorded: number } => {
+  const from = shiftDate(today, -(windowDays - 1));
+  let debtMin = 0;
+  let recorded = 0;
+  for (const d of days) {
+    if (d.date < from || d.date > today || d.sleepMin === null) continue;
+    recorded++;
+    debtMin += Math.max(0, SLEEP_TARGET_MIN - d.sleepMin);
+  }
+  return { debtMin, recorded };
+};
+
+/** 就寝時刻。min は正午からの分（22:00=600、0:00=720、翌2:00=840）。夜をまたいでも並べられるように */
+export type Bedtime = { date: string; min: number };
+
+/** 寝た時刻（sleepStartMs）が18:00〜翌12:00の日だけ。昼寝や、途中から記録された日は除く */
+export const bedtimesOf = (days: BodyDay[]): Bedtime[] => {
+  const out: Bedtime[] = [];
+  for (const d of days) {
+    if (d.sleepStartMs === null) continue;
+    const t = new Date(d.sleepStartMs);
+    let min = t.getHours() * 60 + t.getMinutes() - 720;
+    if (min < 0) min += 1440;
+    if (min < 360) continue;
+    out.push({ date: d.date, min });
+  }
+  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+};
+
+/** 正午からの分 → 「23:40」 */
+export const formatBedtime = (min: number): string => {
+  const t = Math.round(min + 720) % 1440;
+  return `${Math.floor(t / 60)}:${pad2(t % 60)}`;
+};
+
+/** 平均と、ばらつき（標準偏差・分）。2件未満は null */
+export const bedtimeSpread = (list: Bedtime[]): { avg: number; sd: number } | null => {
+  if (list.length < 2) return null;
+  const avg = list.reduce((a, b) => a + b.min, 0) / list.length;
+  const sd = Math.sqrt(list.reduce((a, b) => a + (b.min - avg) ** 2, 0) / list.length);
+  return { avg, sd };
+};
+
+/** 7時間以上の連続日数。current は today（まだ記録が無ければ昨日）から遡った連続、longest は期間内の最長。記録の無い日は途切れ扱い */
+export const sleepStreaks = (days: BodyDay[], today: string): { current: number; longest: number } => {
+  if (days.length === 0) return { current: 0, longest: 0 };
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const ok = (date: string): boolean => judgeSleep(byDate.get(date)?.sleepMin ?? null) === "enough";
+  const first = days.reduce((a, d) => (d.date < a ? d.date : a), days[0].date);
+  let longest = 0;
+  let run = 0;
+  for (let date = first; date <= today; date = shiftDate(date, 1)) {
+    run = ok(date) ? run + 1 : 0;
+    if (run > longest) longest = run;
+  }
+  let current = 0;
+  let date = byDate.get(today)?.sleepMin == null ? shiftDate(today, -1) : today;
+  while (ok(date)) {
+    current++;
+    date = shiftDate(date, -1);
+  }
+  return { current, longest };
+};
+
+export type PeriodAvg = { sleepAvg: number | null; stepsAvg: number | null; ratingAvg: number | null };
+
+/** today までの7日と、その前の7日の平均（記録のある日だけで平均する） */
+export const weekCompare = (days: BodyDay[], ratingOf: (date: string) => number | null, today: string): { thisWeek: PeriodAvg; lastWeek: PeriodAvg } => {
+  const avgBetween = (from: string, to: string): PeriodAvg => {
+    const inside = days.filter((d) => d.date >= from && d.date <= to);
+    const ratings = inside.map((d) => ratingOf(d.date)).filter((r): r is number => r !== null);
+    return {
+      sleepAvg: meanOf(inside.map((d) => d.sleepMin).filter((v): v is number => v !== null)),
+      stepsAvg: meanOf(inside.map((d) => d.steps).filter((v): v is number => v !== null)),
+      ratingAvg: meanOf(ratings),
+    };
+  };
+  return { thisWeek: avgBetween(shiftDate(today, -6), today), lastWeek: avgBetween(shiftDate(today, -13), shiftDate(today, -7)) };
+};
+
 /* ------------------------------------------------------------ 表示用の整形 */
 
 /** 分 → 「7:32」「0:45」（時:分） */

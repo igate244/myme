@@ -20,6 +20,7 @@ import {
   makePairingCode,
   saveRating,
 } from "../infrastructure/bodyRemote";
+import AnalysisPage from "./body/AnalysisPage";
 import MonthCalendar from "./body/MonthCalendar";
 import { STAGE_META, SleepTimeline } from "./body/SleepTimeline";
 import SectionHeader from "./SectionHeader";
@@ -353,7 +354,7 @@ type Ctx = { ratings: RatingMap; room: Record<string, RoomSummary>; samples: Roo
 
 type MetricKey = "steps" | "sleep" | "deepPct" | "sleepHr" | "spo2" | "kcal" | "roomTemp" | "roomHum" | "rating";
 /** 上のタブ。睡眠に関わる項目（睡眠時間・深い睡眠・心拍・血中酸素・室温・湿度）は「睡眠」の1ページにまとめてある */
-type Period = "day" | "week" | "month";
+type Period = "day" | "week" | "month" | "analysis";
 /** 「日」の中で見る項目。睡眠（睡眠・部屋・血中酸素…）と活動（歩数・カロリー・運動）はそれぞれ1ページにまとめてある */
 type Item = "all" | "sleep" | "activity" | "rating";
 
@@ -492,6 +493,7 @@ const VIEW_PERIODS: { key: Period; label: string }[] = [
   { key: "day", label: "日" },
   { key: "week", label: "週" },
   { key: "month", label: "月" },
+  { key: "analysis", label: "分析" },
 ];
 /** 2段目（「日」のときだけ）：見る項目 */
 const ITEM_TABS: { key: Item; label: string }[] = [
@@ -954,6 +956,8 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
 
               {period === "month" ? (
                 <MonthCalendar days={days} ratings={ratings} selected={day.date} loading={loading} onOpenDay={openDay} onNeedFrom={needFrom} />
+              ) : period === "analysis" ? (
+                <AnalysisPage days={days} ratings={ratings} stepsTarget={STEPS_TARGET} />
               ) : period === "week" ? (
                 <WeekBars days={days} ratings={ratings} selected={day.date} loading={loading} onPick={openDay} onNeedFrom={needFrom} />
               ) : (
