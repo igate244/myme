@@ -311,6 +311,23 @@ export const summarizeMonth = (
   return { enough, short, none, avgSleepMin: n === 0 ? null : sum / n, ratingCounts };
 };
 
+/**
+ * 日の一覧（新しい順）の先頭に、today までの「まだ記録が届いていない日」を空の日として足す。
+ * バンドの記録は中継アプリが送ってきた日しか無いので、そのままだと今日の記録が届くまで今日の調子を付けられない。
+ * 足すのは最新の記録の日から最大 maxGap 日ぶん（長く止まっているときに空の日が並びすぎないように）。
+ * 記録が1件も無いときは足さない（「まだ届いていません」の案内を出すため）。
+ */
+export const withEmptyDaysUpTo = (days: BodyDay[], today: string, maxGap = 7): BodyDay[] => {
+  if (days.length === 0) return days;
+  const latest = days[0].date;
+  if (latest >= today) return days;
+  const empties: BodyDay[] = [];
+  for (let date = today; date > latest && empties.length < maxGap; date = shiftDate(date, -1)) {
+    empties.push(normalizeBodyDayPlain(date, undefined));
+  }
+  return [...empties, ...days];
+};
+
 /* ------------------------------------------------------------ 分析（睡眠・調子・歩数の関係） */
 
 /** 「2026-11-16」に n 日足す（引くときは負の数） */

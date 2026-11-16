@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { BodyDay, RoomSample, RoomSummary } from "../domain/body";
-import { RATING_LABELS, normalizeBodyDayPlain, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
+import { RATING_LABELS, normalizeBodyDayPlain, withEmptyDaysUpTo, formatClock, formatDayLabel, formatMinutes, parseRoomSamples, parseSwitchBotCsv, summarizeRoom, workoutName } from "../domain/body";
 import type { RatingMap, RoomDocs } from "../infrastructure/bodyRemote";
 import {
   cacheRating,
@@ -799,7 +799,11 @@ const ActivityPage: React.FC<{ days: BodyDay[]; ctx: Ctx; day: BodyDay; onPick: 
 
 const BodySection: React.FC<Props> = ({ onBack }) => {
   const { user } = useAuth();
-  const [days, setDays] = useState<BodyDay[]>(() => loadCachedBodyDays());
+  const [loadedDays, setDays] = useState<BodyDay[]>(() => loadCachedBodyDays());
+  // 今日の記録がまだ届いていなくても、今日（までの空の日）を並べる。そうしないと今日の調子を付けられない
+  // 今日の日付は毎回見る（アプリを開いたまま日付がまたがれても、新しい今日が足される）
+  const todayStr = toDateStr(new Date());
+  const days = useMemo(() => withEmptyDaysUpTo(loadedDays, todayStr), [loadedDays, todayStr]);
   const [ratings, setRatings] = useState<RatingMap>(() => loadCachedRatings());
   const [roomDocs, setRoomDocs] = useState<RoomDocs>(() => loadCachedRoomDocs());
   const [selected, setSelected] = useState<string | null>(null);
@@ -830,7 +834,7 @@ const BodySection: React.FC<Props> = ({ onBack }) => {
       console.error(e);
       const errCode = e instanceof Error ? ((e as { code?: string }).code ?? e.message) : String(e);
       setError(
-        `${days.length > 0 ? "最新を読み込めなかったので、前回の分を出しています。" : "読み込めませんでした。電波の良いところでもう一度。"}（${errCode}）`,
+        `${loadedDays.length > 0 ? "最新を読み込めなかったので、前回の分を出しています。" : "読み込めませんでした。電波の良いところでもう一度。"}（${errCode}）`,
       );
     } finally {
       setLoading(false);

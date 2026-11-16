@@ -1,7 +1,7 @@
 // 「からだ」のデータ変換（Firestore の REST の形 → 画面で使う形）を確かめる
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { kcalByWeekday, kcalSummary, medianOf, splitByKcal, splitByWorkout, bedtimeSpread, bedtimesOf, formatBedtime, shiftDate, sleepDebt, sleepStreaks, sleepVsRating, stepsVsNextNight, weekCompare, buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
+import { withEmptyDaysUpTo, kcalByWeekday, kcalSummary, medianOf, splitByKcal, splitByWorkout, bedtimeSpread, bedtimesOf, formatBedtime, shiftDate, sleepDebt, sleepStreaks, sleepVsRating, stepsVsNextNight, weekCompare, buildMonthGrid, judgeSleep, summarizeMonth, decodeFsValue, encodePairingCode, formatMinutes, normalizeBodyDay, normalizeBodyDayPlain } from "../src/domain/body.ts";
 
 test("Firestore の値：整数は文字列で来るので数値にする", () => {
   assert.equal(decodeFsValue({ integerValue: "8229" }), 8229);
@@ -283,4 +283,20 @@ test("カロリー：運動をした日／しなかった日（記録のある�
   assert.equal(r.withWorkout.n, 1);
   assert.equal(r.without.n, 1);
   assert.equal(r.withWorkout.nextSleepAvg, 450);
+});
+
+test("今日の記録がまだ届いていなくても、今日（までの空の日）を先頭に足す", () => {
+  const days = [mk("2026-11-15", { sleepMin: 450 }), mk("2026-11-14", { sleepMin: 400 })];
+  const r = withEmptyDaysUpTo(days, "2026-11-16");
+  assert.deepEqual(r.map((d) => d.date), ["2026-11-16", "2026-11-15", "2026-11-14"]);
+  assert.equal(r[0].sleepMin, null);
+  assert.equal(r[1].sleepMin, 450); // 元の日はそのまま
+  // 届いている日が今日まであれば何もしない
+  assert.equal(withEmptyDaysUpTo([mk("2026-11-16")], "2026-11-16").length, 1);
+  // 数日止まっているときは、その間の日も空で並べる（上限あり）
+  const stale = withEmptyDaysUpTo([mk("2026-11-10")], "2026-11-16");
+  assert.deepEqual(stale.map((d) => d.date), ["2026-11-16", "2026-11-15", "2026-11-14", "2026-11-13", "2026-11-12", "2026-11-11", "2026-11-10"]);
+  assert.equal(withEmptyDaysUpTo([mk("2026-10-01")], "2026-11-16").length, 8); // 7日ぶんだけ足す
+  // 記録が1件も無いときは足さない
+  assert.equal(withEmptyDaysUpTo([], "2026-11-16").length, 0);
 });
